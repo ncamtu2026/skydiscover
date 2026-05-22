@@ -602,8 +602,22 @@ class Config:
     agentic: AgenticConfig = field(default_factory=AgenticConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
 
+
+@dataclass
+class KnowledgeBaseConfig:
+    """Configuration for a cross-task knowledge base."""
+
+    enabled: bool = False
+    source_path: Optional[str] = None
+    max_matches: int = 5
+    retrieval_method: str = "text_overlap"
+    include_solution_snippets: bool = True
+    embedding_model: Optional[str] = None
+
+
     # Live monitor dashboard
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
+    knowledge_base: KnowledgeBaseConfig = field(default_factory=KnowledgeBaseConfig)
 
     # Human feedback settings
     human_feedback_enabled: bool = False
@@ -728,6 +742,8 @@ class Config:
             config.benchmark = BenchmarkConfig(**benchmark_known, params=benchmark_params)
         if "monitor" in config_dict:
             config.monitor = MonitorConfig(**config_dict["monitor"])
+        if "knowledge_base" in config_dict:
+            config.knowledge_base = KnowledgeBaseConfig(**config_dict["knowledge_base"])
 
         return config
 
@@ -802,6 +818,14 @@ class Config:
                 "summary_model": self.monitor.summary_model,
                 "summary_top_k": self.monitor.summary_top_k,
                 "summary_interval": self.monitor.summary_interval,
+            },
+            "knowledge_base": {
+                "enabled": self.knowledge_base.enabled,
+                "source_path": self.knowledge_base.source_path,
+                "max_matches": self.knowledge_base.max_matches,
+                "retrieval_method": self.knowledge_base.retrieval_method,
+                "include_solution_snippets": self.knowledge_base.include_solution_snippets,
+                "embedding_model": self.knowledge_base.embedding_model,
             },
             # Human-in-the-loop
             "human_feedback_enabled": self.human_feedback_enabled,

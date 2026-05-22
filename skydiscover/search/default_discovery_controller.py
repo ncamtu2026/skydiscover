@@ -23,6 +23,7 @@ from skydiscover.evaluation.llm_judge import LLMJudge
 from skydiscover.llm.base import LLMResponse
 from skydiscover.llm.llm_pool import LLMPool
 from skydiscover.search.base_database import Program, ProgramDatabase
+from skydiscover.search.knowledge_base import KnowledgeBase
 from skydiscover.search.utils.discovery_utils import SerializableResult, build_image_content
 from skydiscover.utils.code_utils import (
     apply_diff,
@@ -105,6 +106,8 @@ class DiscoveryController:
         self.feedback_reader: Optional[Any] = None
         self._prompt_context: Dict[str, Any] = {}
 
+        self._init_knowledge_base()
+
         # Load evaluator/task description and inject into system message so
         # the LLM knows what problem to solve (especially for from-scratch).
         self._inject_evaluator_context()
@@ -148,6 +151,22 @@ class DiscoveryController:
             if existing
             else f"# Task Description\n\n{task_description}"
         )
+
+    def _init_knowledge_base(self) -> None:
+        """Initialize the knowledge base if enabled in the config."""
+        self.knowledge_base = KnowledgeBase(self.config.knowledge_base)
+
+    def _get_knowledge_query(self) -> str:
+        """Build a query string for knowledge retrieval."""
+        if self.config.context_builder.system_message:
+            return self.config.context_builder.system_message
+
+        if self.config.evaluator.inject_evaluator_context and self.evaluation_file:
+            from skydiscover.search.utils.discovery_utils import load_evaluator_code
+
+            return load_evaluator_code(self.evaluation_file)
+
+        return ""
 
     def _init_context_builder(self):
         """Initialize the appropriate context builder based on config."""
@@ -770,6 +789,25 @@ class DiscoveryController:
         for k, v in self._prompt_context.items():
             if k not in context:
                 context[k] = v
+
+        if self.config.knowledge_base.enabled and self.knowledge_base.entries:
+            query = self._get_knowledge_query()
+            context["knowledge_query"] = query
+            context["knowledge_examples"] = []
+            if query:
+                context["knowledge_examples"] = [
+                    {
+                        "id": entry.id,
+                        "task": entry.task,
+                        "decomposition": entry.task_formalization_and_decomposition,
+                        "solution": entry.solution,
+                        "source": entry.source,
+                        "metadata": entry.metadata,
+                    }
+                    for entry in self.knowledge_base.retrieve(
+                        query, top_k=self.config.knowledge_base.max_matches
+                    )
+                ]
 
         if failed_attempts:
             context["errors"] = failed_attempts

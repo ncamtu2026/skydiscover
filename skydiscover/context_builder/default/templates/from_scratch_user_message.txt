@@ -1,5 +1,7 @@
 {other_context_programs}
 
+{knowledge_examples}
+
 # Task
 Generate a new solution that achieves a high COMBINED_SCORE.
 

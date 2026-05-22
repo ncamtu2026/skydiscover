@@ -8,6 +8,8 @@
 
 {other_context_programs}
 
+{knowledge_examples}
+
 {current_program}
 
 # Task

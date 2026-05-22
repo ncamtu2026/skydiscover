@@ -128,11 +128,18 @@ class DefaultContextBuilder(ContextBuilder):
         )
         user_template = self.template_manager.get_template(user_template_key)
 
+        knowledge_examples_section = self._format_knowledge_examples(
+            context.get("knowledge_examples", []), language
+        )
+        knowledge_query = context.get("knowledge_query", "")
+
         user_message = user_template.format(
             current_program=current_program_section,
             metrics=metrics_str,
             previous_attempts=previous_attempts_section,
             other_context_programs=other_context_section,
+            knowledge_examples=knowledge_examples_section,
+            knowledge_query=knowledge_query,
             improvement_areas=improvement_areas,
             language=language,
             timeout_warning=timeout_warning,
@@ -338,6 +345,34 @@ class DefaultContextBuilder(ContextBuilder):
             for i, program in enumerate(other_context_programs, start=1):
                 self._format_single_context_program(program, i, language, lines)
 
+        return "".join(lines)
+
+    def _format_knowledge_examples(
+        self, knowledge_examples: List[Dict[str, Any]], language: str
+    ) -> str:
+        """Format retrieved cross-task knowledge examples for inclusion in the prompt."""
+        if not knowledge_examples:
+            return ""
+
+        lines = [
+            "\n## Related Tasks and Prior Solutions\n",
+            "The following prior tasks and decompositions may be useful for solving the current task:\n\n",
+        ]
+        for i, example in enumerate(knowledge_examples, start=1):
+            lines.append(f"### Example {i}: {example.get('task', 'Related Task')}\n")
+            decomposition = example.get("decomposition")
+            if decomposition:
+                lines.append(f"- Decomposition:\n{decomposition}\n")
+            source = example.get("source")
+            if source:
+                lines.append(f"- Source: {source}\n")
+            if self.config.context_builder.suggest_simplification_after_chars:
+                # no-op; keep existing behavior
+                pass
+            if example.get("solution") and self.config.knowledge_base.include_solution_snippets:
+                lines.append("- Solution snippet:\n")
+                lines.append(f"```{language}\n{example['solution']}\n```\n")
+            lines.append("\n")
         return "".join(lines)
 
     def _format_failed_attempts(self, errors: list, language: str) -> str:
