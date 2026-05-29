@@ -23,6 +23,7 @@
 - checkpoint_interval: 1
 - API: Deepseek V4 Pro
 - log level: DEBUG
+- reasoning_effort: medium
 ### Summary of Meeting
 - Many gaps are not filled → because they don't have enough data → We need:
 	- Master the tools

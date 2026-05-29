@@ -1,0 +1,91 @@
+# model=deepseek-v4-pro  elapsed=258.71s  in=1000  out=10792
+
+<<<<<<< SEARCH
+# EVOLVE-BLOCK-START
+import networkx as nx
+import json
+import os
+import pandas as pd
+from typing import Dict, List
+
+
+def search_algorithm(src, dsts, G, num_partitions):
+    h = G.copy()
+    h.remove_edges_from(list(h.in_edges(src)) + list(nx.selfloop_edges(h)))
+    bc_topology = BroadCastTopology(src, dsts, num_partitions)
+
+    for dst in dsts:
+        path = nx.dijkstra_path(h, src, dst, weight="cost")
+        for i in range(0, len(path) - 1):
+            s, t = path[i], path[i + 1]
+            for j in range(bc_topology.num_partitions):
+                bc_topology.append_dst_partition_path(dst, j, [s, t, G[s][t]])
+
+    return bc_topology
+# EVOLVE-BLOCK-END
+=======
+# EVOLVE-BLOCK-START
+import networkx as nx
+import json
+import os
+import pandas as pd
+from typing import Dict, List
+import heapq
+
+
+def search_algorithm(src, dsts, G, num_partitions):
+    h = G.copy()
+    h.remove_edges_from(list(h.in_edges(src)) + list(nx.selfloop_edges(h)))
+    bc_topology = BroadCastTopology(src, dsts, num_partitions)
+
+    reached = {src}
+    parent = {src: None}
+    unreached = set(dsts)
+
+    while unreached:
+        # Multi-source Dijkstra from all reached nodes
+        dist = {n: 0.0 if n in reached else float('inf') for n in h.nodes()}
+        prev = {}
+        pq = [(0.0, n) for n in reached]
+        heapq.heapify(pq)
+        while pq:
+            d, u = heapq.heappop(pq)
+            if d > dist[u]:
+                continue
+            for v in h.successors(u):
+                nd = d + h[u][v].get('cost', 0)
+                if nd < dist[v]:
+                    dist[v] = nd
+                    prev[v] = u
+                    heapq.heappush(pq, (nd, v))
+        # Nearest unreached destination
+        best_d = min(unreached, key=lambda d: dist[d])
+        if dist[best_d] == float('inf'):
+            break
+        # Path from best_d back to a reached node
+        path_nodes = []
+        curr = best_d
+        while curr not in reached:
+            path_nodes.append(curr)
+            curr = prev[curr]
+        path_nodes.reverse()
+        u = curr
+        for v in path_nodes:
+            parent[v] = u
+            reached.add(v)
+            u = v
+        unreached.remove(best_d)
+
+    for dst in dsts:
+        node_path = [dst]
+        while node_path[-1] != src:
+            node_path.append(parent[node_path[-1]])
+        node_path.reverse()
+        for i in range(len(node_path)-1):
+            s, t = node_path[i], node_path[i+1]
+            for j in range(num_partitions):
+                bc_topology.append_dst_partition_path(dst, j, [s, t, G[s][t]])
+
+    return bc_topology
+# EVOLVE-BLOCK-END
+>>>>>>> REPLACE

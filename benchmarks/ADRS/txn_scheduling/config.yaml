@@ -3,16 +3,17 @@
 language: python
 diff_based_generation: true
 max_iterations: 100
-checkpoint_interval: 5
+checkpoint_interval: 1
 max_solution_length: 60000
 
 llm:
-  api_base: https://api.openai.com/v1
+  api_base: https://api.deepseek.com
   models:
-    - name: "gpt-5"
+    - name: "deepseek-v4-pro"
       weight: 1.0
   max_tokens: 32000
   timeout: 600
+  reasoning_effort: "medium"
 
 prompt:
   system_message: |-
@@ -41,3 +42,5 @@ evaluator:
   cascade_evaluation: true
   cascade_thresholds: [0.5, 0.75]
 
+
+log_level: "DEBUG"

@@ -13,6 +13,7 @@ llm:
       weight: 1.0
   max_tokens: 32000
   timeout: 600
+  reasoning_effort: "medium"
 
 prompt:
   system_message: |-

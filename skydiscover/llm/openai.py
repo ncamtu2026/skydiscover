@@ -5,6 +5,7 @@ import base64
 import logging
 import os
 import tempfile
+import time
 import uuid as _uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -230,10 +231,26 @@ class OpenAILLM(LLMInterface):
     async def _call_api(self, params: Dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
         try:
+            t0 = time.perf_counter()
             response = await loop.run_in_executor(
                 None, lambda: self.client.chat.completions.create(**params)
             )
-            return response.choices[0].message.content
+            elapsed = time.perf_counter() - t0
+            content = response.choices[0].message.content
+            usage = getattr(response, "usage", None)
+            if usage:
+                out_tokens = usage.completion_tokens or 0
+                total_tokens = usage.total_tokens or 0
+                tok_per_s = out_tokens / elapsed if elapsed > 0 else 0
+                logger.info(
+                    f"LLM speed: {elapsed:.2f}s | {out_tokens} out / {total_tokens} total tokens"
+                    f" | {tok_per_s:.1f} tok/s | model={params.get('model', self.model)}"
+                )
+            if logger.isEnabledFor(logging.DEBUG):
+                messages = params.get("messages", [])
+                logger.debug(f"LLM request:\n{messages}")
+                logger.debug(f"LLM response:\n{content}")
+            return content
         except (openai.BadRequestError, openai.APIStatusError) as exc:
             # Some Azure deployments only expose the Responses API.
             # Fall back transparently when Chat Completions is unsupported.
