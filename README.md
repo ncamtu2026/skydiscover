@@ -175,7 +175,7 @@ SkyDiscover supports three evaluator formats — pick whichever fits your use ca
 | **Containerized** | Custom deps, data files, isolation | `evaluator/` directory (must contain `Dockerfile` + `evaluate.sh`) |
 | **Harbor task** | External benchmark suites (AlgoTune, EvoEval, HumanEvalFix, BigCodeBench, LiveCodeBench, USACO, CRUSTBench, CodePDE, and more) | Task directory (must contain `instruction.md` + `tests/` + `environment/Dockerfile`) |
 
-SkyDiscover auto-detects the format. See [`benchmarks/README.md`](benchmarks/README.md#adding-a-benchmark) for full setup instructions.
+SkyDiscover auto-detects the format. See [`benchmarks/README.md`](Code/skydiscover/benchmarks/README.md#adding-a-benchmark) for full setup instructions.
 
 **Python evaluator** — a file with an `evaluate(program_path)` function:
 
@@ -192,7 +192,7 @@ def evaluate(program_path):
 
 **Containerized evaluator** — a directory with a `Dockerfile` and `evaluate.sh` that writes JSON to stdout. Runs in Docker, so it can have arbitrary dependencies.
 
-**Harbor task** — a directory following the [Harbor](https://harborframework.com/) format (`instruction.md`, `environment/Dockerfile`, `tests/test.sh`). Works out of the box with 8+ tested benchmark suites (see [benchmarks/README.md](benchmarks/README.md#tested-harbor-datasets) for the full list).
+**Harbor task** — a directory following the [Harbor](https://harborframework.com/) format (`instruction.md`, `environment/Dockerfile`, `tests/test.sh`). Works out of the box with 8+ tested benchmark suites (see [benchmarks/README.md](Code/skydiscover/benchmarks/README.md#tested-harbor-datasets) for the full list).
 
 - **combined_score** drives evolution. If omitted, SkyDiscover averages all numeric values in the dict.
 - **artifacts** is optional — entries are injected into the next LLM prompt as context.
@@ -363,9 +363,9 @@ If a benchmark ships its own `requirements.txt`, also run: `uv pip install -r pa
 
 ## 🛠️ Extending SkyDiscover
 
-- **New benchmark** → [`benchmarks/README.md`](benchmarks/README.md#adding-a-benchmark)
-- **New search algorithm** → [`skydiscover/search/README.md`](skydiscover/search/README.md)
-- **New context builder** → [`skydiscover/context_builder/README.md`](skydiscover/context_builder/README.md)
+- **New benchmark** → [`benchmarks/README.md`](Code/skydiscover/benchmarks/README.md#adding-a-benchmark)
+- **New search algorithm** → [`skydiscover/search/README.md`](Code/skydiscover/skydiscover/search/README.md)
+- **New context builder** → [`skydiscover/context_builder/README.md`](Code/skydiscover/skydiscover/context_builder/README.md)
 
 ---
 

@@ -235,7 +235,7 @@ search:
     random_seed: 42
 ```
 
-See [`skydiscover/search/openevolve_native/README.md`](../skydiscover/search/openevolve_native/README.md) for architecture details.
+See [`skydiscover/search/openevolve_native/README.md`](Code/skydiscover/skydiscover/search/openevolve_native/README.md) for architecture details.
 
 </details>
 

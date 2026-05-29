@@ -28,10 +28,10 @@ subclass it and override `run_discovery()`.
 
 | Component | Subfolder | What it does | Extend by |
 |:---|:---|:---|:---|
-| **Context Builder** | `context_builder/` | Assembles LLM prompts from the problem spec, prior solutions, and feedback | Subclass `ContextBuilder` ([README](context_builder/README.md)) |
+| **Context Builder** | `context_builder/` | Assembles LLM prompts from the problem spec, prior solutions, and feedback | Subclass `ContextBuilder` ([README](Code/skydiscover/skydiscover/context_builder/README.md)) |
 | **Solution Generator** | `llm/` | Produces candidates via LLM calls, with optional tool use | Subclass `LLMInterface` |
 | **Evaluator** | `evaluation/` | Scores candidates and logs metadata back into the solution database | Provide an `evaluate.py` script |
-| **Solution Selector** | `search/` | Maintains the solution database and picks parents for the next iteration | Subclass `ProgramDatabase` ([README](search/README.md)) |
+| **Solution Selector** | `search/` | Maintains the solution database and picks parents for the next iteration | Subclass `ProgramDatabase` ([README](Code/skydiscover/skydiscover/search/README.md)) |
 
 ## Additional subfolders
 
