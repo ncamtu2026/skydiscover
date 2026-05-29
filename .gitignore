@@ -64,4 +64,4 @@ tasks/
 examples
 profiles
 paths
-
+tests/api/response_*.txt
