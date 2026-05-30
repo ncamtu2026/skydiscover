@@ -1,10 +1,10 @@
 ### Task List
 - [ ] Run for data
 	- [ ] ADRS (29/05):
-		- [ ] CloudCast ==Minh==
-		- [ ] LLM-SQL ==Minh==
-		- [ ] EPLB ==Dung==
-		- [ ] Prism ==Dung==
+		- [x] CloudCast ==Dung==
+		- [x] LLM-SQL ==Dung==
+		- [x] EPLB ==Dung==
+		- [x] Prism ==Dung==
 		- [ ] TXN ==Dung==
 	- [ ] FrontierCS (30/05)
 		- [ ] CBL ==Minh==
