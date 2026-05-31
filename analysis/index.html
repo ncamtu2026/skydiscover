@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkpoint Analyzer</title>
+
+<!-- diff2html -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/css/diff2html.min.css">
+<script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html-ui.min.js"></script>
+
+<!-- highlight.js (code blocks in reasoning) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+:root {
+  --bg:       #16181d;
+  --surface:  #1e2028;
+  --surface2: #262830;
+  --surface3: #2e3038;
+  --border:   #383b44;
+  --text:     #c9ccd4;
+  --dim:      #7a7f8e;
+  --accent:   #4dabf7;
+  --green:    #40c057;
+  --red:      #f03e3e;
+  --yellow:   #fab005;
+  --purple:   #cc5de8;
+  --radius:   6px;
+  --mono:     'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+header h1 { font-size: 15px; font-weight: 600; color: var(--text); }
+header .sub { color: var(--dim); font-size: 12px; }
+
+/* ── Input bar ───────────────────────────────────────────────── */
+.input-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 18px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+.input-bar textarea {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: none;
+  height: 56px;
+  outline: none;
+}
+.input-bar textarea:focus { border-color: var(--accent); }
+.input-bar textarea::placeholder { color: var(--dim); }
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+button {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 14px;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+button:hover { background: var(--border); }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0c1015;
+  font-weight: 600;
+}
+button.primary:hover { opacity: .88; }
+button.danger { background: var(--red); border-color: var(--red); color: #fff; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── Score chart ─────────────────────────────────────────────── */
+#chartSection {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 18px;
+  flex-shrink: 0;
+  display: none;
+}
+#chartSection canvas { height: 90px !important; }
+
+/* ── Main workspace ──────────────────────────────────────────── */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Checkpoint list ─────────────────────────────────────────── */
+.cp-list {
+  width: 240px;
+  min-width: 200px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.cp-list-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cp-list-body { flex: 1; overflow-y: auto; }
+.cp-item {
+  display: flex;
+  align-items: center;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface2);
+  gap: 8px;
+  transition: background .1s;
+}
+.cp-item:hover { background: var(--surface2); }
+.cp-item.active { background: var(--surface3); border-left: 2px solid var(--accent); padding-left: 10px; }
+.cp-item .iter { font-size: 11px; color: var(--dim); font-family: var(--mono); width: 44px; flex-shrink: 0; }
+.cp-item .score-bar-wrap { flex: 1; }
+.cp-item .score-val { font-size: 11px; font-family: var(--mono); text-align: right; flex-shrink: 0; }
+.score-bar { height: 4px; border-radius: 2px; background: var(--green); }
+.cp-item.improved .score-val { color: var(--green); }
+.cp-item.regressed .score-val { color: var(--red); }
+.cp-item.unchanged .score-val { color: var(--dim); }
+
+/* ── Detail pane ─────────────────────────────────────────────── */
+.detail-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.detail-header {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.detail-header .cp-name { font-weight: 600; font-size: 14px; }
+.metric-badge {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.metric-badge.highlight { border-color: var(--accent); color: var(--accent); }
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--dim);
+  padding: 8px 18px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab-btn:hover { color: var(--text); background: none; }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-content { flex: 1; overflow: hidden; display: none; }
+.tab-content.active { display: flex; flex-direction: column; }
+
+/* ── Diff view ───────────────────────────────────────────────── */
+.diff-container {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* Override diff2html dark styles */
+.d2h-file-wrapper { border-color: var(--border) !important; border-radius: var(--radius) !important; }
+.d2h-file-header { background: var(--surface2) !important; border-color: var(--border) !important; }
+.d2h-code-linenumber { background: var(--surface) !important; border-color: var(--border) !important; }
+.d2h-code-line { background: var(--surface) !important; }
+.d2h-ins { background: rgba(64,192,87,.12) !important; }
+.d2h-del { background: rgba(240,62,62,.12) !important; }
+.d2h-ins.d2h-change { background: rgba(64,192,87,.2) !important; }
+.d2h-del.d2h-change { background: rgba(240,62,62,.2) !important; }
+.d2h-ins .d2h-code-line-ctn ins { background: rgba(64,192,87,.35) !important; }
+.d2h-del .d2h-code-line-ctn del { background: rgba(240,62,62,.35) !important; }
+.d2h-tag { background: var(--surface3) !important; color: var(--dim) !important; border-color: var(--border) !important; }
+
+/* ── Candidates tab ──────────────────────────────────────────── */
+.candidates-pane {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.prog-list {
+  width: 220px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.prog-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface2);
+  transition: background .1s;
+}
+.prog-item:hover { background: var(--surface2); }
+.prog-item.active { background: var(--surface3); border-left: 2px solid var(--purple); padding-left: 10px; }
+.prog-item .prog-score { font-size: 12px; font-family: var(--mono); color: var(--purple); font-weight: 600; }
+.prog-item .prog-meta { font-size: 11px; color: var(--dim); }
+
+.prog-detail {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.prog-detail-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.prog-detail-body { flex: 1; overflow: auto; }
+
+/* ── Code block ──────────────────────────────────────────────── */
+.code-block {
+  background: #0d1117;
+  border-radius: var(--radius);
+  padding: 12px;
+  margin: 8px 12px;
+  overflow: auto;
+}
+.code-block pre { margin: 0; }
+.code-block code { font-family: var(--mono); font-size: 12px; }
+
+/* ── Reasoning ───────────────────────────────────────────────── */
+.reasoning-panel { padding: 12px 14px; }
+.reasoning-text {
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.sr-block { margin-bottom: 12px; }
+.sr-block-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 4px;
+}
+
+/* ── Analysis section ────────────────────────────────────────── */
+.analysis-section {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.analysis-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  user-select: none;
+}
+.analysis-toggle:hover { background: var(--surface2); }
+.analysis-toggle .label { font-weight: 600; font-size: 12px; }
+.analysis-toggle .arrow { color: var(--dim); transition: transform .2s; }
+.analysis-toggle.open .arrow { transform: rotate(180deg); }
+.analysis-body { display: none; padding: 12px 16px; border-top: 1px solid var(--border); }
+.analysis-body.open { display: block; }
+
+.analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
+.analysis-grid .full-col { grid-column: 1 / -1; }
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { font-size: 11px; color: var(--dim); font-weight: 500; }
+.form-row input, .form-row textarea, .form-row select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 9px;
+  font-size: 12px;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+}
+.form-row input[type="number"] { font-family: var(--mono); }
+.form-row input:focus, .form-row textarea:focus { border-color: var(--accent); }
+.form-row input[type="password"] { font-family: var(--mono); letter-spacing: .1em; }
+
+.analysis-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+.analysis-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+
+#analysisResult {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: none;
+}
+#analysisResult.visible { display: block; }
+.streaming-cursor { display: inline-block; width: 7px; background: var(--accent); animation: blink .9s step-end infinite; }
+@keyframes blink { 0%,100% { opacity:1 } 50% { opacity:0 } }
+
+/* ── Misc ────────────────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 12px;
+  height: 100%;
+  flex: 1;
+}
+.tag {
+  display: inline-block;
+  background: var(--surface3);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.scroll { overflow-y: auto; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+.no-cp { color: var(--dim); font-size: 12px; padding: 20px; text-align: center; }
+.spin {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <h1>Checkpoint Analyzer</h1>
+  <span class="sub">Visualise evolutionary search runs</span>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+    <span id="cpCount" class="tag" style="display:none"></span>
+  </div>
+</header>
+
+<!-- Input bar -->
+<div class="input-bar">
+  <textarea id="dirsInput" placeholder="Checkpoint directories, one per line:&#10;/path/to/txn_output&#10;/path/to/cloudcast_output&#10;/path/to/run3/checkpoints"></textarea>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <button class="primary" onclick="loadCheckpoints()">Load</button>
+    <button onclick="clearAll()">Clear</button>
+  </div>
+</div>
+
+<!-- Score chart -->
+<div id="chartSection">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
+    <span style="font-size:11px;color:var(--dim);font-weight:600;">SCORE OVER ITERATIONS</span>
+    <select id="metricSelect" onchange="redrawChart()" style="font-size:11px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text)"></select>
+  </div>
+  <canvas id="scoreChart"></canvas>
+</div>
+
+<!-- Main workspace -->
+<div class="workspace">
+
+  <!-- Checkpoint list -->
+  <div class="cp-list">
+    <div class="cp-list-header">Checkpoints <span id="cpListCount" style="font-weight:400;color:var(--dim)"></span></div>
+    <div class="cp-list-body" id="cpListBody">
+      <div class="no-cp">No checkpoints loaded</div>
+    </div>
+  </div>
+
+  <!-- Detail pane -->
+  <div class="detail-pane">
+    <!-- Empty state -->
+    <div class="empty-state" id="detailEmpty">Select a checkpoint to view details</div>
+
+    <!-- Loaded state -->
+    <div id="detailLoaded" style="display:none;flex:1;overflow:hidden;display:none;flex-direction:column;">
+      <div class="detail-header" id="detailHeader"></div>
+
+      <div class="tabs">
+        <button class="tab-btn active" id="tabBtnDiff" onclick="switchTab('diff')">Best Program Diff</button>
+        <button class="tab-btn" id="tabBtnCandidates" onclick="switchTab('candidates')">Candidates <span id="candidateCount" class="tag" style="margin-left:4px"></span></button>
+      </div>
+
+      <!-- Diff tab -->
+      <div class="tab-content active" id="tabDiff">
+        <div class="diff-container" id="diffContainer">
+          <div class="empty-state">Loading diff…</div>
+        </div>
+      </div>
+
+      <!-- Candidates tab -->
+      <div class="tab-content" id="tabCandidates">
+        <div class="candidates-pane">
+          <div class="prog-list" id="progList"></div>
+          <div class="prog-detail" id="progDetail">
+            <div class="empty-state">Select a candidate</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Analysis section -->
+<div class="analysis-section">
+  <div class="analysis-toggle" id="analysisToggle" onclick="toggleAnalysis()">
+    <span class="label">AI Analysis</span>
+    <span class="tag" id="analysisSampleTag" style="display:none"></span>
+    <span style="flex:1"></span>
+    <span class="arrow">▼</span>
+  </div>
+  <div class="analysis-body" id="analysisBody">
+    <div class="analysis-grid">
+      <!-- Range & interval -->
+      <div class="form-row">
+        <label>Start iteration</label>
+        <input type="number" id="rangeStart" value="1" min="1">
+      </div>
+      <div class="form-row">
+        <label>End iteration</label>
+        <input type="number" id="rangeEnd" value="100" min="1">
+      </div>
+      <div class="form-row">
+        <label>Interval (sample every N checkpoints)</label>
+        <input type="number" id="rangeInterval" value="10" min="1">
+      </div>
+      <div class="form-row" style="justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <button onclick="previewSample()" style="width:100%">Preview sample</button>
+      </div>
+
+      <!-- API config -->
+      <div class="form-row">
+        <label>API base URL</label>
+        <input type="text" id="apiBase" placeholder="https://api.openai.com/v1">
+      </div>
+      <div class="form-row">
+        <label>Model</label>
+        <input type="text" id="apiModel" placeholder="gpt-4o">
+      </div>
+      <div class="form-row full-col">
+        <label>API key</label>
+        <input type="password" id="apiKey" placeholder="sk-…">
+      </div>
+
+      <!-- Prompt -->
+      <div class="form-row full-col">
+        <label>Custom analysis prompt (optional — leave blank for default)</label>
+        <textarea id="analysisPrompt" rows="2" style="resize:vertical;" placeholder="e.g. Focus on what caused regressions between checkpoint 30 and 50…"></textarea>
+      </div>
+    </div>
+
+    <div class="analysis-actions">
+      <button class="primary" id="analyzeBtn" onclick="startAnalysis()">Analyse</button>
+      <button onclick="clearAnalysis()">Clear result</button>
+      <span id="analyzeStatus" style="color:var(--dim);font-size:12px;align-self:center;"></span>
+    </div>
+
+    <div id="analysisResult"></div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────────────────────
+let checkpoints = [];          // array of checkpoint summary objects
+let selectedIdx  = -1;         // index into checkpoints[]
+let selectedProg = null;       // currently selected candidate program
+let chartInst    = null;       // Chart.js instance
+let codeCache    = {};         // { path: code }
+let allMetricKeys = [];        // metric keys across all checkpoints
+
+// ──────────────────────────────────────────────────────────────────────────
+// Persist API settings in localStorage
+// ──────────────────────────────────────────────────────────────────────────
+(function restoreSettings() {
+  const s = JSON.parse(localStorage.getItem('cpAnalyzerSettings') || '{}');
+  if (s.apiBase)  document.getElementById('apiBase').value  = s.apiBase;
+  if (s.apiModel) document.getElementById('apiModel').value = s.apiModel;
+  if (s.apiKey)   document.getElementById('apiKey').value   = s.apiKey;
+})();
+
+function saveSettings() {
+  localStorage.setItem('cpAnalyzerSettings', JSON.stringify({
+    apiBase:  document.getElementById('apiBase').value,
+    apiModel: document.getElementById('apiModel').value,
+    apiKey:   document.getElementById('apiKey').value,
+  }));
+}
+['apiBase','apiModel','apiKey'].forEach(id =>
+  document.getElementById(id).addEventListener('input', saveSettings)
+);
+
+// ──────────────────────────────────────────────────────────────────────────
+// Load checkpoints
+// ──────────────────────────────────────────────────────────────────────────
+async function loadCheckpoints() {
+  const raw = document.getElementById('dirsInput').value.trim();
+  if (!raw) return;
+  const dirs = raw.split('\n').map(l => l.trim()).filter(Boolean);
+
+  document.getElementById('cpListBody').innerHTML = '<div style="padding:14px;color:var(--dim);"><span class="spin"></span> Loading…</div>';
+  document.getElementById('chartSection').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dirs }),
+    });
+    checkpoints = await res.json();
+  } catch (e) {
+    alert('Failed to load: ' + e.message);
+    return;
+  }
+
+  if (!checkpoints.length) {
+    document.getElementById('cpListBody').innerHTML = '<div class="no-cp">No checkpoints found in those directories.</div>';
+    return;
+  }
+
+  collectMetricKeys();
+  renderCheckpointList();
+  drawChart();
+  updateRangeDefaults();
+
+  const tag = document.getElementById('cpCount');
+  tag.style.display = '';
+  tag.textContent = checkpoints.length + ' checkpoints';
+  document.getElementById('cpListCount').textContent = '(' + checkpoints.length + ')';
+}
+
+function clearAll() {
+  checkpoints = [];
+  selectedIdx  = -1;
+  selectedProg = null;
+  codeCache    = {};
+  document.getElementById('cpListBody').innerHTML = '<div class="no-cp">No checkpoints loaded</div>';
+  document.getElementById('chartSection').style.display = 'none';
+  document.getElementById('detailEmpty').style.display = '';
+  document.getElementById('detailLoaded').style.display = 'none';
+  document.getElementById('cpCount').style.display = 'none';
+  document.getElementById('cpListCount').textContent = '';
+  if (chartInst) { chartInst.destroy(); chartInst = null; }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Checkpoint list rendering
+// ──────────────────────────────────────────────────────────────────────────
+function collectMetricKeys() {
+  const keySet = new Set();
+  checkpoints.forEach(cp => Object.keys(cp.metrics || {}).forEach(k => keySet.add(k)));
+  allMetricKeys = Array.from(keySet);
+
+  const sel = document.getElementById('metricSelect');
+  sel.innerHTML = allMetricKeys.map(k => `<option value="${k}">${k}</option>`).join('');
+  // Prefer combined_score
+  if (allMetricKeys.includes('combined_score')) sel.value = 'combined_score';
+}
+
+function getMetricForChart() {
+  return document.getElementById('metricSelect').value;
+}
+
+function renderCheckpointList() {
+  // Determine max score for bar scaling
+  const metric = getMetricForChart();
+  const scores = checkpoints.map(cp => cp.metrics?.[metric] ?? cp.best_score ?? 0);
+  const maxScore = Math.max(...scores.filter(isFinite), 1);
+
+  const body = document.getElementById('cpListBody');
+  body.innerHTML = '';
+
+  checkpoints.forEach((cp, idx) => {
+    const score = scores[idx];
+    const prevScore = idx > 0 ? scores[idx - 1] : null;
+    const cls = prevScore == null ? '' : score > prevScore ? 'improved' : score < prevScore ? 'regressed' : 'unchanged';
+    const barW = maxScore > 0 ? Math.max((score / maxScore) * 100, 2) : 2;
+    const scoreLabel = typeof score === 'number' ? score.toFixed(1) : '—';
+
+    const div = document.createElement('div');
+    div.className = `cp-item ${cls}`;
+    div.dataset.idx = idx;
+    div.innerHTML = `
+      <span class="iter">#${cp.iteration}</span>
+      <div class="score-bar-wrap"><div class="score-bar" style="width:${barW}%"></div></div>
+      <span class="score-val">${scoreLabel}</span>`;
+    div.addEventListener('click', () => selectCheckpoint(idx));
+    body.appendChild(div);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Chart
+// ──────────────────────────────────────────────────────────────────────────
+function drawChart() {
+  document.getElementById('chartSection').style.display = 'block';
+  const metric = getMetricForChart();
+  const labels = checkpoints.map(cp => cp.iteration);
+  const data   = checkpoints.map(cp => cp.metrics?.[metric] ?? cp.best_score ?? null);
+
+  if (chartInst) chartInst.destroy();
+
+  const ctx = document.getElementById('scoreChart').getContext('2d');
+  chartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: '#4dabf7',
+        backgroundColor: 'rgba(77,171,247,.08)',
+        borderWidth: 1.5,
+        pointRadius: 2,
+        pointHoverRadius: 4,
+        tension: 0.1,
+        fill: true,
+        spanGaps: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => `Iteration ${items[0].label}`,
+            label: item => `${metric}: ${typeof item.raw === 'number' ? item.raw.toFixed(4) : item.raw}`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#7a7f8e', font: { size: 10 }, maxTicksLimit: 12 }, grid: { color: '#262830' } },
+        y: { ticks: { color: '#7a7f8e', font: { size: 10 } }, grid: { color: '#262830' } },
+      },
+      onClick(e, elements) {
+        if (elements.length) selectCheckpoint(elements[0].index);
+      },
+    },
+  });
+}
+
+function redrawChart() { if (checkpoints.length) { drawChart(); renderCheckpointList(); } }
+
+function updateRangeDefaults() {
+  if (!checkpoints.length) return;
+  document.getElementById('rangeStart').value = checkpoints[0].iteration;
+  document.getElementById('rangeEnd').value   = checkpoints[checkpoints.length - 1].iteration;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Checkpoint selection
+// ──────────────────────────────────────────────────────────────────────────
+async function selectCheckpoint(idx) {
+  selectedIdx = idx;
+  selectedProg = null;
+
+  // Highlight in list
+  document.querySelectorAll('.cp-item').forEach(el => el.classList.remove('active'));
+  const item = document.querySelector(`.cp-item[data-idx="${idx}"]`);
+  if (item) { item.classList.add('active'); item.scrollIntoView({ block: 'nearest' }); }
+
+  const cp = checkpoints[idx];
+
+  // Show detail pane
+  document.getElementById('detailEmpty').style.display = 'none';
+  const loaded = document.getElementById('detailLoaded');
+  loaded.style.display = 'flex';
+
+  // Header
+  const metric = getMetricForChart();
+  const score  = cp.metrics?.[metric] ?? cp.best_score;
+  const allMetrics = Object.entries(cp.metrics || {})
+    .map(([k, v]) => `<span class="metric-badge${k === metric ? ' highlight' : ''}">${k}: ${typeof v === 'number' ? v.toFixed(4) : v}</span>`)
+    .join(' ');
+  document.getElementById('detailHeader').innerHTML = `
+    <span class="cp-name">${cp.name}</span>
+    <span class="tag" style="color:var(--dim)">${cp.source_dir.split('/').slice(-2).join('/')}</span>
+    ${allMetrics}
+    <span style="margin-left:auto;color:var(--dim);font-size:11px">${cp.program_count} programs in store</span>`;
+
+  // Reset tabs
+  switchTab('diff');
+
+  // Load diff
+  await loadDiff(idx);
+
+  // Preload candidates in background
+  loadCandidates(idx);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tabs
+// ──────────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tabBtnDiff').classList.toggle('active', tab === 'diff');
+  document.getElementById('tabBtnCandidates').classList.toggle('active', tab === 'candidates');
+  document.getElementById('tabDiff').classList.toggle('active', tab === 'diff');
+  document.getElementById('tabCandidates').classList.toggle('active', tab === 'candidates');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Diff tab
+// ──────────────────────────────────────────────────────────────────────────
+async function getBestCode(cpPath) {
+  if (codeCache[cpPath] !== undefined) return codeCache[cpPath];
+  const res = await fetch('/api/best-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: cpPath }),
+  });
+  const { code } = await res.json();
+  codeCache[cpPath] = code || '';
+  return codeCache[cpPath];
+}
+
+async function loadDiff(idx) {
+  const diffCont = document.getElementById('diffContainer');
+  diffCont.innerHTML = '<div class="empty-state"><span class="spin"></span></div>';
+
+  const cp   = checkpoints[idx];
+  const prev = idx > 0 ? checkpoints[idx - 1] : null;
+
+  const [codeB, codeA] = await Promise.all([
+    getBestCode(cp.path),
+    prev ? getBestCode(prev.path) : Promise.resolve(''),
+  ]);
+
+  if (!codeA && !codeB) {
+    diffCont.innerHTML = '<div class="empty-state">No code found</div>';
+    return;
+  }
+
+  if (!prev) {
+    // First checkpoint — show the full file as additions
+    renderDiff(diffCont, '', codeB, 'initial', cp.name);
+    return;
+  }
+
+  if (codeA === codeB) {
+    diffCont.innerHTML = `<div class="empty-state" style="flex-direction:column;gap:8px;">
+      <span>No change in best program from ${prev.name}</span>
+      <span style="color:var(--dim);font-size:11px">Score: ${prev.best_score?.toFixed(4) ?? '—'} → ${cp.best_score?.toFixed(4) ?? '—'}</span>
+    </div>`;
+    return;
+  }
+
+  renderDiff(diffCont, codeA, codeB, prev.name + ' (best)', cp.name + ' (best)');
+}
+
+async function renderDiff(container, codeA, codeB, labelA, labelB) {
+  try {
+    const res = await fetch('/api/diff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code_a: codeA, code_b: codeB, label_a: labelA, label_b: labelB }),
+    });
+    const { diff } = await res.json();
+
+    if (!diff) {
+      container.innerHTML = '<div class="empty-state">No diff (files identical)</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    const ui = new Diff2HtmlUI(container, diff, {
+      drawFileList: false,
+      matching: 'lines',
+      outputFormat: 'side-by-side',
+      highlight: true,
+      renderNothingWhenEmpty: false,
+    });
+    ui.draw();
+    ui.highlightCode();
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Candidates tab
+// ──────────────────────────────────────────────────────────────────────────
+let cachedPrograms = {}; // keyed by checkpoint path
+
+async function loadCandidates(idx) {
+  const cp = checkpoints[idx];
+  if (cachedPrograms[cp.path] !== undefined) {
+    if (selectedIdx === idx) renderProgList(cachedPrograms[cp.path]);
+    return;
+  }
+
+  const res = await fetch('/api/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: cp.path }),
+  });
+  const programs = await res.json();
+  cachedPrograms[cp.path] = programs;
+
+  if (selectedIdx === idx) renderProgList(programs);
+}
+
+function renderProgList(programs) {
+  const badge = document.getElementById('candidateCount');
+  badge.textContent = programs.length;
+
+  const list = document.getElementById('progList');
+  list.innerHTML = '';
+
+  programs.forEach((prog, i) => {
+    const m = prog.metrics || {};
+    const score = m.combined_score ?? Math.max(...Object.values(m).filter(v => typeof v === 'number'), 0);
+    const div = document.createElement('div');
+    div.className = 'prog-item';
+    div.dataset.progIdx = i;
+    div.innerHTML = `
+      <div class="prog-score">${typeof score === 'number' ? score.toFixed(2) : '—'}</div>
+      <div class="prog-meta">gen ${prog.generation ?? '?'} · iter ${prog.iteration_found ?? '?'}</div>
+      <div class="prog-meta" style="color:var(--dim)">${Object.entries(m).filter(([k]) => k !== 'combined_score').map(([k,v]) => `${k}: ${typeof v === 'number' ? v.toFixed(2) : v}`).join(' · ')}</div>`;
+    div.addEventListener('click', () => selectProgram(prog, div));
+    list.appendChild(div);
+  });
+
+  if (!programs.length) {
+    list.innerHTML = '<div class="no-cp">No programs found</div>';
+  }
+}
+
+async function selectProgram(prog, el) {
+  selectedProg = prog;
+  document.querySelectorAll('.prog-item').forEach(e => e.classList.remove('active'));
+  if (el) el.classList.add('active');
+
+  await renderProgramDetail(prog);
+}
+
+async function renderProgramDetail(prog) {
+  const pane = document.getElementById('progDetail');
+
+  // Sub-tabs
+  pane.innerHTML = `
+    <div class="prog-detail-tabs">
+      <button class="tab-btn active" id="pdTabBtnSolution" onclick="switchProgTab('solution')">Solution</button>
+      <button class="tab-btn" id="pdTabBtnReasoning" onclick="switchProgTab('reasoning')">Reasoning & Diff</button>
+    </div>
+    <div class="prog-detail-body" id="pdBodySolution">
+      <div class="code-block"><pre><code class="language-python" id="solutionCode"></code></pre></div>
+    </div>
+    <div class="prog-detail-body" id="pdBodyReasoning" style="display:none;">
+      <div class="reasoning-panel" id="reasoningPanel"></div>
+    </div>`;
+
+  // Solution code
+  const codeEl = document.getElementById('solutionCode');
+  codeEl.textContent = prog.solution || '(no code)';
+  hljs.highlightElement(codeEl);
+
+  // Reasoning
+  renderReasoning(prog);
+}
+
+function switchProgTab(tab) {
+  document.getElementById('pdTabBtnSolution').classList.toggle('active', tab === 'solution');
+  document.getElementById('pdTabBtnReasoning').classList.toggle('active', tab === 'reasoning');
+  document.getElementById('pdBodySolution').style.display  = tab === 'solution'   ? '' : 'none';
+  document.getElementById('pdBodyReasoning').style.display = tab === 'reasoning'  ? '' : 'none';
+}
+
+async function renderReasoning(prog) {
+  const panel = document.getElementById('reasoningPanel');
+  if (!panel) return;
+
+  const prompts = prog.prompts;
+  const key = Object.keys(prompts || {}).find(k => prompts[k]?.responses?.length);
+  const responses = key ? (prompts[key].responses || []) : [];
+
+  if (!responses.length) {
+    panel.innerHTML = '<div class="empty-state" style="height:60px">No LLM response recorded (initial program?)</div>';
+    return;
+  }
+
+  // Parse first response (usually the successful one)
+  const responseText = responses[0] || '';
+  const { reasoning, blocks } = parseSearchReplace(responseText);
+
+  let html = '';
+
+  if (reasoning) {
+    html += `<div class="sr-block-title">Reasoning</div>
+             <div class="reasoning-text">${escapeHtml(reasoning)}</div>`;
+  }
+
+  if (blocks.length) {
+    html += `<div class="sr-block-title" style="margin-top:8px">${blocks.length} change${blocks.length>1?'s':''} proposed</div>`;
+    blocks.forEach((b, i) => {
+      html += `<div class="sr-block" id="srBlock${i}"><div style="color:var(--dim);font-size:11px;margin-bottom:4px">Change ${i+1}</div><div id="srDiff${i}" style="min-height:40px"><span class="spin"></span></div></div>`;
+    });
+  } else {
+    html += '<div style="color:var(--dim);font-size:12px;margin-top:8px">No SEARCH/REPLACE blocks found in response.</div>';
+  }
+
+  panel.innerHTML = html;
+
+  // Async-render each diff block
+  blocks.forEach(async (b, i) => {
+    const cont = document.getElementById(`srDiff${i}`);
+    if (!cont) return;
+    await renderDiff(cont, b.search, b.replace, 'before (SEARCH)', 'after (REPLACE)');
+  });
+}
+
+function parseSearchReplace(text) {
+  const srPattern = /<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
+  const fullPattern = /<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g;
+  const reasoning = text.replace(fullPattern, '').replace(/\n{3,}/g, '\n\n').trim();
+  const blocks = [];
+  let m;
+  while ((m = srPattern.exec(text)) !== null) {
+    blocks.push({ search: m[1], replace: m[2] });
+  }
+  return { reasoning, blocks };
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Analysis section
+// ──────────────────────────────────────────────────────────────────────────
+function toggleAnalysis() {
+  const toggle = document.getElementById('analysisToggle');
+  const body   = document.getElementById('analysisBody');
+  toggle.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function computeSamplePaths() {
+  if (!checkpoints.length) return [];
+  const start    = parseInt(document.getElementById('rangeStart').value, 10);
+  const end      = parseInt(document.getElementById('rangeEnd').value, 10);
+  const interval = Math.max(1, parseInt(document.getElementById('rangeInterval').value, 10));
+
+  // Filter by iteration range
+  const inRange = checkpoints.filter(cp => cp.iteration >= start && cp.iteration <= end);
+  // Sample every interval-th
+  return inRange.filter((_, i) => i % interval === 0);
+}
+
+function previewSample() {
+  const sampled = computeSamplePaths();
+  const tag = document.getElementById('analysisSampleTag');
+  tag.style.display = '';
+  tag.textContent = `${sampled.length} checkpoints sampled`;
+  document.getElementById('analyzeStatus').textContent =
+    `Sample: iterations ${sampled.map(c => c.iteration).join(', ')}`;
+}
+
+async function startAnalysis() {
+  const sampled = computeSamplePaths();
+  if (!sampled.length) { alert('No checkpoints in the selected range.'); return; }
+
+  saveSettings();
+
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  const resultEl = document.getElementById('analysisResult');
+  resultEl.classList.add('visible');
+  resultEl.innerHTML = '<span class="streaming-cursor"></span>';
+
+  const status = document.getElementById('analyzeStatus');
+  status.textContent = `Sending ${sampled.length} checkpoints to API…`;
+
+  const payload = {
+    checkpoint_paths: sampled.map(c => c.path),
+    checkpoint_metas: sampled,
+    api_base:  document.getElementById('apiBase').value.trim() || 'https://api.openai.com/v1',
+    api_key:   document.getElementById('apiKey').value.trim(),
+    model:     document.getElementById('apiModel').value.trim() || 'gpt-4o',
+    prompt:    document.getElementById('analysisPrompt').value.trim(),
+  };
+
+  let text = '';
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') break;
+        try {
+          const obj = JSON.parse(raw);
+          if (obj.error) { text += `\n[Error: ${obj.error}]`; break; }
+          if (obj.text)  text += obj.text;
+        } catch {}
+      }
+      resultEl.innerHTML = escapeHtml(text) + '<span class="streaming-cursor"></span>';
+      resultEl.scrollTop = resultEl.scrollHeight;
+    }
+  } catch (e) {
+    text += `\n[Error: ${e.message}]`;
+  }
+
+  resultEl.innerHTML = escapeHtml(text);
+  btn.disabled = false;
+  status.textContent = 'Done.';
+}
+
+function clearAnalysis() {
+  const el = document.getElementById('analysisResult');
+  el.innerHTML = '';
+  el.classList.remove('visible');
+  document.getElementById('analyzeStatus').textContent = '';
+}
+</script>
+</body>
+</html>
