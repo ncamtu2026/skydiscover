@@ -286,15 +286,39 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.7;
-  white-space: pre-wrap;
   word-break: break-word;
   background: var(--surface2);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 12px 16px;
   margin-bottom: 12px;
-  max-height: 200px;
-  overflow-y: auto;
 }
+.reasoning-text p { margin: 0 0 0.65em; }
+.reasoning-text p:last-child { margin-bottom: 0; }
+.reasoning-text h1, .reasoning-text h2, .reasoning-text h3 {
+  font-weight: 600; margin: 0.9em 0 0.35em; color: var(--text);
+}
+.reasoning-text h1 { font-size: 14px; }
+.reasoning-text h2 { font-size: 13px; }
+.reasoning-text h3 { font-size: 12.5px; color: var(--accent); }
+.reasoning-text ul, .reasoning-text ol { margin: 0.4em 0 0.4em 1.5em; }
+.reasoning-text li { margin-bottom: 0.25em; }
+.reasoning-text strong { font-weight: 600; }
+.reasoning-text em { font-style: italic; color: var(--dim); }
+.reasoning-text code {
+  background: var(--surface3);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.reasoning-text pre {
+  background: #0d1117;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.reasoning-text pre code { background: none; padding: 0; font-size: 11.5px; }
 .sr-block { margin-bottom: 12px; }
 .sr-block-title {
   font-size: 11px;
@@ -965,8 +989,13 @@ async function renderReasoning(prog) {
   let html = '';
 
   if (reasoning) {
-    html += `<div class="sr-block-title">Reasoning</div>
-             <div class="reasoning-text">${escapeHtml(reasoning)}</div>`;
+    html += `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span class="sr-block-title" style="margin-bottom:0">Reasoning</span>
+        <button onclick="toggleRaw(this)" style="font-size:10px;padding:2px 8px;margin-left:auto">Show raw</button>
+      </div>
+      <div class="reasoning-text reasoning-parsed">${renderMarkdown(reasoning)}</div>
+      <pre class="reasoning-text reasoning-raw" style="display:none;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap">${escapeHtml(responseText)}</pre>`;
   }
 
   if (blocks.length) {
@@ -991,7 +1020,10 @@ async function renderReasoning(prog) {
 function parseSearchReplace(text) {
   const srPattern = /<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
   const fullPattern = /<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g;
-  const reasoning = text.replace(fullPattern, '').replace(/\n{3,}/g, '\n\n').trim();
+  let reasoning = text.replace(fullPattern, '');
+  // Strip empty code-block wrappers left over after removing SEARCH/REPLACE blocks
+  reasoning = reasoning.replace(/```\w*\n\s*```/g, '');
+  reasoning = reasoning.replace(/\n{3,}/g, '\n\n').trim();
   const blocks = [];
   let m;
   while ((m = srPattern.exec(text)) !== null) {
@@ -1002,6 +1034,60 @@ function parseSearchReplace(text) {
 
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toggleRaw(btn) {
+  const panel = btn.closest('.reasoning-panel');
+  const parsed = panel.querySelector('.reasoning-parsed');
+  const raw    = panel.querySelector('.reasoning-raw');
+  const showingRaw = raw.style.display !== 'none';
+  parsed.style.display = showingRaw ? '' : 'none';
+  raw.style.display    = showingRaw ? 'none' : '';
+  btn.textContent = showingRaw ? 'Show raw' : 'Show parsed';
+}
+
+function renderMarkdown(raw) {
+  const codeBlocks = [];
+  // Protect fenced code blocks first
+  let s = raw.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(escapeHtml(code.trimEnd()));
+    return `\x00CB${idx}\x00`;
+  });
+  // Escape HTML in the rest
+  s = escapeHtml(s);
+  // Protect inline code
+  const inlineCodes = [];
+  s = s.replace(/`([^`\n]+)`/g, (_, c) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(c);
+    return `\x00IC${idx}\x00`;
+  });
+  // Bold & italic
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  // Headers
+  s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Paragraphs / lists per blank-line chunk
+  const out = s.split(/\n{2,}/).map(chunk => {
+    chunk = chunk.trim();
+    if (!chunk) return '';
+    if (/^(<h[1-3]>|\x00CB)/.test(chunk)) return chunk;
+    const lines = chunk.split('\n');
+    if (lines.every(l => /^[-*]\s/.test(l.trim()))) {
+      return '<ul>' + lines.map(l => `<li>${l.replace(/^[-*]\s/, '').trim()}</li>`).join('') + '</ul>';
+    }
+    if (lines.every(l => /^\d+\.\s/.test(l.trim()))) {
+      return '<ol>' + lines.map(l => `<li>${l.replace(/^\d+\.\s/, '').trim()}</li>`).join('') + '</ol>';
+    }
+    return `<p>${lines.join('<br>')}</p>`;
+  });
+  let html = out.filter(Boolean).join('\n');
+  html = html.replace(/\x00IC(\d+)\x00/g, (_, i) => `<code>${inlineCodes[+i]}</code>`);
+  html = html.replace(/\x00CB(\d+)\x00/g, (_, i) => `<pre><code>${codeBlocks[+i]}</code></pre>`);
+  return html;
 }
 
 // ──────────────────────────────────────────────────────────────────────────

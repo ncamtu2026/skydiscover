@@ -42,10 +42,7 @@ result = evaluator.evaluate(
 score = result.score
 ```
 
-Có thể viết một skydiscover evaluator wrapper gọi SingleEvaluator.evaluate() — Frontier-CS tự lo Docker, mình chỉ cần truyền code và lấy score về:
-
-note thêm ở đây
-so sánh hiệu năng vs cs frontier eval gốc
+Có thể viết một skydiscover evaluator wrapper gọi SingleEvaluator.evaluate() — Frontier-CS tự lo Docker, mình chỉ cần truyền code và lấy score về.
 
 Bài toán CBL và MCBL có nhiều dòng dataset, được gọi là variant, hiện tại thử nghiệm trên 2 variant dưới với mục tiêu nhanh, dễ tối ưu (không có thông tin paper barbarian dùng variant nào)
 - CBL: mixed_availability_loose_deadline_small_overhead
@@ -63,3 +60,17 @@ datasets_dir/
 Trong khi thực tế trông như sau:
 `cant-be-late-simulator/real/ddl=.../...`
 Đây là cách tốt nhất vì nếu sửa trực tiếp cấu trúc thư mục sẽ khiến code Frontier CS ở đoạn khác hardcode không thực thi được.
+
+```
+Mỗi iteration:
+  ├── [1] copy workspace               ~1s
+  ├── [2] uv pip install               ~60s
+  ├── [3] set_up_env.sh                ~0s
+  └── [4] evaluate.sh → score          ~120-300s
+```
+Hiện tại chỉ mount 2 thứ vào Docker container là problem files + solution & trace data
+Đoạn `uv pip install` có thể cache được, nhưng cần sửa code Frontier CS file `research_docker.py` để mount cả uv cache từ host vào.
+
+Có thể tối ưu thêm tốc độ evolve bằng cách tăng `max_parallel_iterations` trong `skydiscover/skydiscover/config.py`.
+
+Khi chạy CBL 5 iteration xuất hiện tình trạng output token bị cắt ở 16000, đã nâng trong config_deepseek.yaml lên 32000.
