@@ -25,6 +25,30 @@ _LEVEL_LABELS = {
     "L3": "Exploitation (specific — targeted optimizations)",
 }
 
+_ATTRIBUTION_SYSTEM = """\
+You are a research analyst. Given a list of academic papers and a generated solution, \
+determine which papers (if any) motivated or influenced the solution.
+"""
+
+_ATTRIBUTION_USER = """\
+## Papers provided as context (numbered for reference)
+{paper_list}
+
+## Generated solution
+```
+{solution}
+```
+
+## Task
+Analyze the solution above and determine which papers (if any) influenced it.
+- If any paper motivated the solution: cite it as [N] Title, then explain the specific \
+concept or technique adopted and how it was applied in this solution.
+- If multiple papers contributed, list each on a new line.
+- If none of the papers influenced the solution, respond with exactly: none
+
+Respond with the attribution only. No preamble.
+"""
+
 _DIGEST_SYSTEM = """\
 You are a research assistant distilling academic paper knowledge into actionable insights.
 Given retrieved paper excerpts, produce 3-5 concise bullet points.
@@ -145,18 +169,19 @@ class KnowledgeEvolve:
             lines.append(content)
             lines.append("")
 
-        lines.append(
-            "## ATTRIBUTION REQUIRED\n"
-            "After writing your solution, add exactly ONE comment line at the very end of the code block:\n"
-            "  # KNOWLEDGE_ATTRIBUTION: <your attribution>\n"
-            "Rules:\n"
-            "- If any paper above motivated or inspired your solution, cite it by [N] and title, "
-            "then briefly explain what concept or technique you borrowed and how you applied it.\n"
-            "  Example: # KNOWLEDGE_ATTRIBUTION: [2] DeDe — adapted its resource-partitioning heuristic "
-            "to split broadcast tree per cloud; [5] Caribou — borrowed geo-routing cost model for link selection\n"
-            "- If none of the papers influenced your solution, write: # KNOWLEDGE_ATTRIBUTION: none\n"
-            "Do NOT skip this line."
-        )
+        if self.config.attribution_mode == "inline":
+            lines.append(
+                "## ATTRIBUTION REQUIRED\n"
+                "After writing your solution, add exactly ONE comment line at the very end of the code block:\n"
+                "  # KNOWLEDGE_ATTRIBUTION: <your attribution>\n"
+                "Rules:\n"
+                "- If any paper above motivated or inspired your solution, cite it by [N] and title, "
+                "then briefly explain what concept or technique you borrowed and how you applied it.\n"
+                "  Example: # KNOWLEDGE_ATTRIBUTION: [2] DeDe — adapted its resource-partitioning heuristic "
+                "to split broadcast tree per cloud; [5] Caribou — borrowed geo-routing cost model for link selection\n"
+                "- If none of the papers influenced your solution, write: # KNOWLEDGE_ATTRIBUTION: none\n"
+                "Do NOT skip this line."
+            )
 
         return "\n".join(lines)
 
@@ -192,3 +217,41 @@ class KnowledgeEvolve:
         except Exception as e:
             logger.warning(f"Digest LLM call failed ({e}), falling back to raw format.")
             return self._format_raw(results)
+
+    async def evaluate_attribution(
+        self, solution: str, results: List[Dict]
+    ) -> str:
+        """
+        Post-generation attribution: call guide LLM with solution + papers to produce attribution.
+        Used when attribution_mode == "post_eval".
+        Returns attribution text, or "none" on failure.
+        """
+        if not results:
+            return "none"
+
+        paper_list_parts = []
+        for i, result in enumerate(results, 1):
+            meta = result.get("metadata", {})
+            title = meta.get("title", "Unknown")
+            field_type = meta.get("field_type", "")
+            paper_list_parts.append(f"[{i}] {title} ({field_type})")
+
+        try:
+            response = await self.llm_pool.generate(
+                system_message=_ATTRIBUTION_SYSTEM,
+                messages=[{
+                    "role": "user",
+                    "content": _ATTRIBUTION_USER.format(
+                        paper_list="\n".join(paper_list_parts),
+                        solution=solution[:3000],
+                    ),
+                }],
+                temperature=0.3,
+                max_tokens=800,
+                reasoning_effort=None,
+            )
+            text = (response.text or "").strip()
+            return text if text else "none"
+        except Exception as e:
+            logger.warning(f"Post-eval attribution LLM call failed ({e}).")
+            return "none"

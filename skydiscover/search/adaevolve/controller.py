@@ -763,6 +763,19 @@ class AdaEvolveController(DiscoveryController):
         if not child_solution:
             return SerializableResult(error="No valid solution in response", iteration=iteration)
 
+        # Post-eval attribution: separate guide LLM call with solution + papers
+        if (
+            knowledge_attribution is None
+            and self.knowledge_evolve
+            and self._last_knowledge_meta
+            and self._last_knowledge_meta.get("n_results", 0) > 0
+            and getattr(self.config.knowledge, "attribution_mode", "inline") == "post_eval"
+        ):
+            knowledge_attribution = await self.knowledge_evolve.evaluate_attribution(
+                solution=child_solution,
+                results=self.knowledge_evolve.last_results,
+            )
+
         # Evaluate
         try:
             eval_input = image_path if self.config.language == "image" else child_solution

@@ -49,6 +49,11 @@ class KnowledgeEvolveConfig:
     output_mode: str = "raw_text"                   # "raw_text" | "digest"
     max_tokens_per_sample: Optional[int] = None     # None = no truncation
 
+    # --- Attribution ---
+    # "inline":    ask the code-generating LLM to append # KNOWLEDGE_ATTRIBUTION: ... in its output
+    # "post_eval": after code is generated, call the guide LLM separately with solution + papers
+    attribution_mode: str = "inline"
+
     # --- Fields to index / query ---
     content_fields: List[str] = field(
         default_factory=lambda: [
