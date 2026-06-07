@@ -76,6 +76,10 @@ class Runner:
         self.database.language = self.config.language or "python"
         self.evaluation_file = evaluation_file
         self.evaluator_env_vars = dict(evaluator_env_vars or {})
+        # Make output_dir available inside evaluate() for timing logs
+        self.evaluator_env_vars.setdefault("SKYDISCOVER_OUTPUT_DIR", self.output_dir)
+        # Also expose to the main process so LLM-layer logs can find the output dir.
+        os.environ.setdefault("SKYDISCOVER_OUTPUT_DIR", self.output_dir)
 
         # Initialize the discovery controller
         self.discovery_controller: Optional[DiscoveryController] = None

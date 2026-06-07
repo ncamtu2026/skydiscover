@@ -1,0 +1,71 @@
+# Cant-Be-Late — skydiscover config (DeepSeek)
+# Usage: uv run skydiscover-run <initial_program.py> <evaluator_sd.py> -c config_deepseek.yaml -s adaevolve -i 50
+
+language: python
+diff_based_generation: true
+max_iterations: 100
+checkpoint_interval: 1
+log_level: "DEBUG"
+max_solution_length: 20000
+
+llm:
+  api_base: https://api.deepseek.com/v1
+  models:
+    - name: "deepseek-v4-pro"
+      weight: 1.0
+      reasoning_effort: "medium"
+  max_tokens: 32000
+  timeout: 600
+
+evaluator:
+  timeout: 1000  # 300s eval + buffer for Docker startup and uv install
+
+prompt:
+  system_message: |
+    You are an expert in cloud scheduling optimization.
+
+    PROBLEM: Minimize cost for a long-running compute job that must finish before a hard deadline.
+    At each timestep choose: SPOT (cheap, may be preempted), ON_DEMAND (expensive, guaranteed), or NONE (pause, free).
+    A restart overhead is incurred whenever the job restarts after preemption or instance switch.
+    Restart overheads do not stack — a new restart replaces any pending overhead.
+    Failing to finish before the deadline incurs a penalty of -100000.
+
+    SCORING (0–100):
+      normalized = (OD_anchor - AvgCost) / (OD_anchor - SPOT_anchor)
+      score = clip(normalized, 0, 1) × 100
+    where OD_anchor = fully on-demand cost, SPOT_anchor = fully spot cost.
+    Higher score = lower cost.
+
+    SOLUTION INTERFACE:
+    ```python
+    from sky_spot.strategies.strategy import Strategy
+    from sky_spot.utils import ClusterType
+
+    class Solution(Strategy):
+        NAME = "my_solution"  # unique identifier, required
+
+        def solve(self, spec_path: str) -> "Solution":
+            # Called once. Read deadline/duration/overhead from spec_path JSON. Must return self.
+            return self
+
+        def _step(self, last_cluster_type: ClusterType, has_spot: bool) -> ClusterType:
+            # Called every timestep. Must NOT return ClusterType.SPOT when has_spot=False.
+            return ClusterType.SPOT if has_spot else ClusterType.ON_DEMAND
+    ```
+
+    AVAILABLE ATTRIBUTES in _step:
+    - self.env.elapsed_seconds    — time elapsed so far (seconds)
+    - self.env.gap_seconds        — size of each timestep (seconds)
+    - self.env.cluster_type       — cluster type active in current step
+    - self.task_duration          — total work required (seconds)
+    - self.task_done_time         — list of completed work segments; sum() = work done
+    - self.deadline               — hard deadline (seconds)
+    - self.restart_overhead       — overhead when restarting (seconds)
+
+    REQUIRED ELEMENTS (missing any will cause evaluation failure):
+    - NAME attribute on the Solution class
+    - _from_args(cls, parser) classmethod
+    - solve() must return self
+    - _step() must not return ClusterType.SPOT when has_spot=False
+
+    OUTPUT: A complete Python file with only the Solution class and its imports.

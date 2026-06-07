@@ -1,0 +1,81 @@
+# Cant-Be-Late Multi-Region — skydiscover config (DeepSeek)
+# Usage: uv run skydiscover-run <initial_program.py> <evaluator_sd.py> -c config_deepseek.yaml -s adaevolve -i 50
+
+language: python
+diff_based_generation: true
+max_iterations: 100
+checkpoint_interval: 1
+log_level: "DEBUG"
+max_solution_length: 20000
+
+llm:
+  api_base: https://api.deepseek.com/v1
+  models:
+    - name: "deepseek-v4-pro"
+      weight: 1.0
+      reasoning_effort: "medium"
+  max_tokens: 32000
+  timeout: 600
+
+evaluator:
+  timeout: 1000
+
+prompt:
+  system_message: |
+    You are an expert in multi-region cloud scheduling optimization.
+
+    PROBLEM: Minimize cost for a long-running compute job that must finish before a hard deadline.
+    At each timestep choose a resource type: SPOT (cheap, may be preempted), ON_DEMAND (expensive, guaranteed), or NONE (pause, free).
+    You may also switch AWS regions at any timestep — switching forces a restart overhead.
+    A restart overhead is incurred whenever the job restarts after preemption or region switch.
+    Restart overheads do not stack — a new restart replaces any pending overhead.
+    Each region has different spot availability patterns from real traces.
+    Failing to finish before the deadline incurs a penalty of -100000.
+
+    SCORING:
+      combined_score = -average_cost_across_all_scenarios
+    Lower cost = higher (less negative) score. Penalty for missing deadline: -100000.
+
+    SOLUTION INTERFACE:
+    ```python
+    from sky_spot.strategies.multi_strategy import MultiRegionStrategy
+    from sky_spot.utils import ClusterType
+
+    class Solution(MultiRegionStrategy):
+        NAME = "my_solution"  # unique identifier, required
+
+        def solve(self, spec_path: str) -> "Solution":
+            # Called once. Read deadline/duration/overhead from spec_path JSON. Must return self.
+            return self
+
+        def _step(self, last_cluster_type: ClusterType, has_spot: bool) -> ClusterType:
+            # Called every timestep. Must NOT return ClusterType.SPOT when has_spot=False.
+            return ClusterType.SPOT if has_spot else ClusterType.ON_DEMAND
+    ```
+
+    AVAILABLE ATTRIBUTES in _step:
+    - self.env.elapsed_seconds        — time elapsed so far (seconds)
+    - self.env.gap_seconds            — size of each timestep (seconds)
+    - self.env.cluster_type           — cluster type active in current step
+    - self.env.get_current_region()   — current region index (0–8)
+    - self.env.get_num_regions()      — total number of regions
+    - self.env.switch_region(idx)     — switch to region by index (call before returning)
+    - self.task_duration              — total work required (seconds)
+    - self.task_done_time             — list of completed work segments; sum() = work done
+    - self.deadline                   — hard deadline (seconds)
+    - self.restart_overhead           — overhead when restarting (seconds)
+    - self.remaining_restart_overhead — current pending overhead (seconds)
+
+    REGION SWITCHING NOTES:
+    - Switching regions costs one restart_overhead (same as preemption)
+    - Call self.env.switch_region(idx) before returning the ClusterType
+    - has_spot reflects availability in the NEW region after switch_region()
+    - Spot availability varies per region — switching can find available spot when current region has none
+
+    REQUIRED ELEMENTS (missing any will cause evaluation failure):
+    - NAME attribute on the Solution class
+    - _from_args(cls, parser) classmethod
+    - solve() must return self
+    - _step() must not return ClusterType.SPOT when has_spot=False
+
+    OUTPUT: A complete Python file with only the Solution class and its imports.

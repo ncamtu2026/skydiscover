@@ -44,7 +44,7 @@ outputs_*/
 # Benchmark generated data
 benchmarks/image_gen/sky_festival/sky_festival_output/
 benchmarks/image_gen/sky_festival/sky_festival_paradigm_output_*/
-benchmarks/frontier-cs-eval/Frontier-CS
+# benchmarks/frontier-cs-eval/Frontier-CS  (temporarily commented for git add)
 benchmarks/ADRS/eplb/expert-load.json
 benchmarks/ADRS/cloudcast/profiles/
 benchmarks/ADRS/cloudcast/examples/

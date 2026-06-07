@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from typing import List, Tuple
 
@@ -45,29 +44,23 @@ def calculate_length(value):
 
 def evaluate_df_prefix_hit_cnt(df: pd.DataFrame) -> Tuple[int, int]:
     """
-    Function to evaluate the prefix hit count of a DataFrame
+    Evaluate the prefix hit count of a DataFrame.
+
+    Each row string is compared against all previously seen rows via a Trie to
+    find the longest matching prefix (simulating LLM prompt-cache reuse).
+    Processing is sequential because each insertion must precede the next lookup.
     """
-
-    def max_overlap(trie, row_string):
-        return min(len(row_string), trie.longest_common_prefix(row_string))
-
+    # Build all row strings at once with vectorized ops, then iterate sequentially.
+    row_strings = df.fillna("").astype(str).agg("".join, axis=1).tolist()
 
     trie = Trie()
     total_prefix_hit_count = 0
-    total_string_length = 0
+    total_string_length = sum(len(s) for s in row_strings)
 
-    def process_row(index, row):
-        nonlocal total_string_length
-        row_string = "".join(row.fillna("").astype(str).values)  # No spaces between columns
-        total_string_length += len(row_string)
-        row_prefix_hit_count = max_overlap(trie, row_string)
+    for row_string in row_strings:
+        total_prefix_hit_count += min(len(row_string), trie.longest_common_prefix(row_string))
         trie.insert(row_string)
-        return row_prefix_hit_count
 
-    with ThreadPoolExecutor() as executor:
-        results = executor.map(process_row, df.index, [row for _, row in df.iterrows()])
-
-    total_prefix_hit_count = sum(results)
     total_prefix_hit_rate = total_prefix_hit_count / total_string_length
     assert total_prefix_hit_count <= total_string_length
     print(f"Total string length: {total_string_length}")
