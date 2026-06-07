@@ -41,11 +41,26 @@ outputs*/
 outputs_*/
 
 
+# KnowledgeEvolve
+chroma_db/
+**/chroma_db/
+skydiscover/knowledge/data/
+
+# Benchmark outputs
+**/output/
+**/outputs/
+**/outputs_*/
+**/output_*/
+**/*_output/
+**/*_output_*/
+
 # Benchmark generated data
 benchmarks/image_gen/sky_festival/sky_festival_output/
 benchmarks/image_gen/sky_festival/sky_festival_paradigm_output_*/
 benchmarks/frontier-cs-eval/Frontier-CS
 benchmarks/ADRS/eplb/expert-load.json
+benchmarks/ADRS/eplb/evaluator/expert-load.json
+benchmarks/ADRS/llm_sql/evaluator/datasets/
 benchmarks/ADRS/cloudcast/profiles/
 benchmarks/ADRS/cloudcast/examples/
 benchmarks/ADRS/llm_sql/datasets/

@@ -1,3 +1,4 @@
+
 - [ ] Fix code to log detail of evaluation results (==BTM==) (DL 06/06)
 	- When a solution is better than other solutions, we still don't know at which iterations, which moments, or which samples it performs better — we don't really understand *why* this solution produces better results. -> We need to save detailed logs for this.
 - [ ] Experiments (==BTM==) (DL 06/06)
@@ -69,9 +70,10 @@
 				- [ ] reasoning high: 3 times
 				- [ ] reasoning low: 3 times
 				- [ ] reasoning off: 3 times
+				- [ ] 
 - [ ] Check bugs (==BTM==) (DL 06/06)
 	- [ ] EPLB, TXN often encounter some errors while running but they may not affect the results -> identify them
-- [ ] Research Agentic Memory (==DTD==) (DL 06/06)
+- [x] Research Agentic Memory (==DTD==) (DL 06/06) -> Overview
 - [ ] Implement Knowledge Evolve (==DTD==) (DL 07/06)
 	- [ ] Idea
 	- [ ] Data preparation (use data of AIDE Carbon -> create more attributes)

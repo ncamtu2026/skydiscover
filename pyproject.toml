@@ -46,6 +46,12 @@ external = [
     "gepa[full]",
     "litellm>=1.81",  # gepa[full] needs litellm, but uv override-dependencies strips the [full] extra
 ]
+knowledge = [
+    "chromadb>=0.4.0",
+    "google-generativeai>=0.8.0",   # Gemini embedding backend
+    "sentence-transformers>=2.2.0", # HuggingFace embedding backend
+    "numpy>=1.22.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -100,6 +106,7 @@ disallow_incomplete_defs = true
 [project.scripts]
 skydiscover-run = "skydiscover.cli:main"
 skydiscover-viewer = "skydiscover.extras.monitor.viewer:main"
+skydiscover-knowledge-ingest = "skydiscover.knowledge.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

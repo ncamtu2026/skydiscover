@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 from skydiscover.context_builder.adaevolve import AdaEvolveContextBuilder
 from skydiscover.context_builder.default import DefaultContextBuilder
 from skydiscover.evaluation.llm_judge import LLMJudge
+from skydiscover.knowledge import KnowledgeEvolveConfig, create_embedder
+from skydiscover.knowledge.knowledge_evolve import KnowledgeEvolve
 from skydiscover.llm.llm_pool import LLMPool
 from skydiscover.search.adaevolve.paradigm import ParadigmGenerator
 from skydiscover.search.base_database import Program
@@ -92,6 +94,25 @@ class AdaEvolveController(DiscoveryController):
             )
         else:
             self.paradigm_generator = None
+
+        # KnowledgeEvolve (optional RAG module)
+        self._last_knowledge_meta: Optional[Dict] = None
+        self.knowledge_evolve: Optional[KnowledgeEvolve] = None
+        db_config = self.config.search.database
+        if getattr(db_config, "use_knowledge_evolve", False):
+            try:
+                ke_config: KnowledgeEvolveConfig = self.config.knowledge
+                embedder = create_embedder(ke_config)
+                self.knowledge_evolve = KnowledgeEvolve(ke_config, embedder, self.guide_llms)
+                logger.info(
+                    f"KnowledgeEvolve enabled "
+                    f"(parent={db_config.knowledge_use_parent}, "
+                    f"paradigm={db_config.knowledge_use_paradigm}, "
+                    f"mode={ke_config.output_mode})"
+                )
+            except Exception as e:
+                logger.warning(f"KnowledgeEvolve init failed, disabling: {e}")
+                self.knowledge_evolve = None
 
         # JSON logging for comprehensive AdaEvolve stats
         self._iteration_stats_log_path: Optional[str] = None
@@ -189,6 +210,11 @@ class AdaEvolveController(DiscoveryController):
 
             # Add timestamp
             stats["timestamp"] = datetime.now().isoformat()
+
+            # Add knowledge retrieval info if available
+            if self._last_knowledge_meta is not None:
+                stats["knowledge_retrieve"] = self._last_knowledge_meta
+                self._last_knowledge_meta = None
 
             # Add iteration-specific info
             stats["iteration_result"] = {
@@ -542,6 +568,48 @@ class AdaEvolveController(DiscoveryController):
             for k, v in self._prompt_context.items():
                 if k not in context:
                     context[k] = v
+
+            # KnowledgeEvolve: retrieve relevant paper knowledge before building prompt
+            if self.knowledge_evolve:
+                ke_db_config = self.config.search.database
+                stage = "paradigm" if paradigm else "parent"
+                should_use_knowledge = (
+                    (stage == "parent" and getattr(ke_db_config, "knowledge_use_parent", True))
+                    or (stage == "paradigm" and getattr(ke_db_config, "knowledge_use_paradigm", True))
+                )
+                if should_use_knowledge:
+                    try:
+                        evaluator_feedback = None
+                        if parent.artifacts and isinstance(parent.artifacts, dict):
+                            evaluator_feedback = parent.artifacts.get("feedback")
+                        context["knowledge"] = await self.knowledge_evolve.get_context(
+                            task_description=self.config.context_builder.system_message or "",
+                            current_best_score=self.database.get_program_proxy_score(parent),
+                            evaluator_feedback=evaluator_feedback,
+                            stage=stage,
+                            search_mode=sampling_mode,
+                            parent_code=parent.solution,
+                            parent_metrics=parent.metrics,
+                            failed_paradigms=self.database.get_previously_tried_ideas(),
+                        )
+                        level = self.knowledge_evolve._determine_level(stage, sampling_mode)
+                        self._last_knowledge_meta = {
+                            "stage": stage,
+                            "level": level,
+                            "n_results": len(self.knowledge_evolve.last_results),
+                            "papers": [
+                                {
+                                    "title": r.get("metadata", {}).get("title", ""),
+                                    "paper_path": r.get("metadata", {}).get("paper_path", ""),
+                                    "field_type": r.get("metadata", {}).get("field_type", ""),
+                                    "similarity": round(1.0 - r.get("distance", 0.5), 4),
+                                }
+                                for r in self.knowledge_evolve.last_results
+                            ],
+                        }
+                    except Exception as e:
+                        logger.warning(f"KnowledgeEvolve retrieval failed: {e}")
+                        self._last_knowledge_meta = None
 
             # Build prompt (AdaEvolveContextBuilder handles paradigm/sibling/error formatting)
             prompt = self.context_builder.build_prompt(parent_dict, context)

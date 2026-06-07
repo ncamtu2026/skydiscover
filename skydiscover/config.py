@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import yaml
 
+from skydiscover.knowledge.config import KnowledgeEvolveConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -432,6 +434,11 @@ class AdaEvolveDatabaseConfig(DatabaseConfig):
     stagnation_threshold: int = 10
     stagnation_multi_child_count: int = 3
 
+    # KnowledgeEvolve integration flags
+    use_knowledge_evolve: bool = False
+    knowledge_use_parent: bool = True
+    knowledge_use_paradigm: bool = True
+
     # Sibling context
     sibling_context_limit: int = 5
 
@@ -605,6 +612,9 @@ class Config:
     # Live monitor dashboard
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
 
+    # KnowledgeEvolve RAG module
+    knowledge: KnowledgeEvolveConfig = field(default_factory=KnowledgeEvolveConfig)
+
     # Human feedback settings
     human_feedback_enabled: bool = False
     human_feedback_file: Optional[str] = None
@@ -728,6 +738,8 @@ class Config:
             config.benchmark = BenchmarkConfig(**benchmark_known, params=benchmark_params)
         if "monitor" in config_dict:
             config.monitor = MonitorConfig(**config_dict["monitor"])
+        if "knowledge" in config_dict:
+            config.knowledge = KnowledgeEvolveConfig(**config_dict["knowledge"])
 
         return config
 
@@ -811,6 +823,11 @@ class Config:
             "max_solution_length": self.max_solution_length,
             # Parallelism
             "max_parallel_iterations": self.max_parallel_iterations,
+            # KnowledgeEvolve
+            "knowledge": {
+                f.name: getattr(self.knowledge, f.name)
+                for f in fields(self.knowledge)
+            },
         }
 
 

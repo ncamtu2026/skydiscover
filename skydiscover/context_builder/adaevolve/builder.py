@@ -222,7 +222,12 @@ class AdaEvolveContextBuilder(DefaultContextBuilder):
             if sibling_section:
                 sections.append(sibling_section)
 
-        # 4. Error retry context
+        # 4. Knowledge context (pre-computed by controller, passed via context dict)
+        knowledge = context.get("knowledge")
+        if knowledge:
+            sections.append(knowledge)
+
+        # 5. Error retry context
         if error_context:
             sections.append(self._format_error_context(error_context))
 
