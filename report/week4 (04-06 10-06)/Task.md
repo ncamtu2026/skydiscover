@@ -74,10 +74,10 @@
 - [ ] Check bugs (==BTM==) (DL 06/06)
 	- [ ] EPLB, TXN often encounter some errors while running but they may not affect the results -> identify them
 - [x] Research Agentic Memory (==DTD==) (DL 06/06) -> Overview
-- [ ] Implement Knowledge Evolve (==DTD==) (DL 07/06)
-	- [ ] Idea
-	- [ ] Data preparation (use data of AIDE Carbon -> create more attributes)
-	- [ ] Implement Idea
+- [x] Implement Knowledge Evolve (==DTD==) (DL 07/06)
+	- [x] Idea
+	- [x] Data preparation (use data of AIDE Carbon -> create more attributes)
+	- [x] Implement Idea
 - [ ] Causal Analysis on Results (==DTD==) (DL 08/06)
 	- [ ] Implement codebase for automatic causal analysis (for success and failure of solutions)
 	- [ ] Test on AdaEvolve, OpenEvolve
