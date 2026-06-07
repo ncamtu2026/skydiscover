@@ -69,6 +69,9 @@ class Retriever:
         self.embedder = embedder
         self.llm_pool = llm_pool
         self._collection = None
+        self.last_queries: Dict[str, str] = {}
+        self.last_field_results: Dict[str, List[Dict[str, Any]]] = {}
+        self.last_random_samples: List[Dict[str, Any]] = []
 
     def _get_collection(self):
         if self._collection is None:
@@ -130,7 +133,8 @@ class Retriever:
                 system_message=_QUERY_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
                 temperature=temperature,
-                max_tokens=400,
+                max_tokens=1200,
+                reasoning_effort=None,  # disable thinking tokens; output is short JSON
             )
             raw = response.text or "{}"
             # Strip markdown fences if model wraps JSON in ```
@@ -267,15 +271,19 @@ class Retriever:
             parent_metrics=parent_metrics,
             failed_paradigms=failed_paradigms,
         )
+        self.last_queries = queries
 
         # Search each field and merge, deduplicating by doc ID
         all_candidates: List[Dict[str, Any]] = []
         seen_ids: set = set()
+        self.last_field_results = {}
 
         for field_name in self.config.content_fields:
             query_text = queries.get(field_name) or task_description[:200]
             query_emb = self.embedder.embed([query_text], task_type="query")[0]
-            for result in self._search_field(query_emb, field_name, top_k):
+            field_hits = self._search_field(query_emb, field_name, top_k)
+            self.last_field_results[field_name] = field_hits
+            for result in field_hits:
                 if result["id"] not in seen_ids:
                     seen_ids.add(result["id"])
                     all_candidates.append(result)
@@ -288,10 +296,12 @@ class Retriever:
         sampled_ids = {s["id"] for s in sampled}
 
         # Random exploration sample
+        self.last_random_samples = []
         for _ in range(self.config.n_random_samples):
             rnd = self._random_sample(exclude_ids=sampled_ids)
             if rnd:
                 sampled.append(rnd)
                 sampled_ids.add(rnd["id"])
+                self.last_random_samples.append(rnd)
 
         return sampled

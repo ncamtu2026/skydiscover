@@ -111,6 +111,7 @@ class ParadigmGenerator:
         current_best_score: float,
         previously_tried_ideas: Optional[List[str]] = None,
         evaluator_feedback: Optional[str] = None,
+        knowledge_context: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Generate breakthrough paradigms with retry logic.
@@ -130,6 +131,7 @@ class ParadigmGenerator:
             current_best_score,
             previously_tried_ideas or [],
             evaluator_feedback=evaluator_feedback,
+            knowledge_context=knowledge_context,
         )
 
         last_error = None
@@ -158,6 +160,7 @@ class ParadigmGenerator:
                                                 "what_to_optimize": {"type": "string"},
                                                 "cautions": {"type": "string"},
                                                 "approach_type": {"type": "string"},
+                                                "attribution": {"type": "string"},
                                             },
                                             "required": [
                                                 "idea",
@@ -165,6 +168,7 @@ class ParadigmGenerator:
                                                 "what_to_optimize",
                                                 "cautions",
                                                 "approach_type",
+                                                "attribution",
                                             ],
                                             "additionalProperties": False,
                                         },
@@ -258,6 +262,7 @@ class ParadigmGenerator:
         best_score: float,
         previously_tried: List[str],
         evaluator_feedback: Optional[str] = None,
+        knowledge_context: Optional[str] = None,
     ) -> str:
         """Build the full prompt for paradigm generation."""
         if self._is_prompt_optimization:
@@ -279,18 +284,31 @@ class ParadigmGenerator:
                 self._build_output_format_section(),
             ]
 
-        # Inject evaluator feedback so paradigm ideas are informed by
-        # specific failure modes identified by the evaluator.
         if evaluator_feedback:
             max_len = 2000
             if len(evaluator_feedback) > max_len:
                 evaluator_feedback = evaluator_feedback[:max_len] + "\n... (truncated)"
             sections.insert(
-                -1,  # before the output format section
+                -1,
                 f"## Evaluator Feedback on Current Best Program\n"
                 f"The evaluator analyzed cases where the current program fails. "
                 f"Use this to inform your breakthrough ideas:\n\n"
                 f"{evaluator_feedback}",
+            )
+
+        if knowledge_context:
+            sections.insert(
+                -1,
+                f"{knowledge_context}\n\n"
+                f"Papers above are numbered [1], [2], ... Use these to inspire breakthrough ideas. "
+                f"For each idea's `attribution` field, if the idea was inspired by any paper(s), "
+                f"cite them by number and title, then explain:\n"
+                f"  (a) the specific concept, method, or insight you drew from the paper;\n"
+                f"  (b) how you adapted or applied it to the current problem.\n"
+                f"Example: '[3] FlowCut: Fast Min-Cut for Routing — adopted its lazy edge-contraction "
+                f"strategy; adapted it here to prune low-bandwidth inter-cloud links before running "
+                f"the broadcast tree, reducing search space by ~60%.'\n"
+                f"If an idea is entirely original and not paper-inspired, write \"none\".",
             )
 
         return "\n\n".join(sections)
@@ -613,6 +631,7 @@ Each idea must be a JSON object with these fields:
 - "what_to_optimize": What metrics/areas to focus on
 - "cautions": Important implementation details to watch for
 - "approach_type": Exact "library.function" format (e.g., "scipy.optimize.minimize")
+- "attribution": If paper-inspired: cite paper(s) by "[N] Title" then explain (a) the specific concept/method drawn from each, and (b) how it was adapted to this problem. Write "none" if entirely original.
 
 **Diversity Requirement:** Each idea must use a DIFFERENT approach type.
 Do not generate variations of the same technique.
@@ -628,7 +647,8 @@ Example:
             "description": "Apply scipy.optimize.minimize directly to optimize all variables together...",
             "what_to_optimize": "{', '.join(self.objective_names) if self.objective_names else 'primary evaluator score'}",
             "cautions": "Ensure constraints are properly formulated, use multiple starting points",
-            "approach_type": "scipy.optimize.minimize"
+            "approach_type": "scipy.optimize.minimize",
+            "attribution": "[2] DeDe: A General Framework — drew on its resource-partitioning heuristic (§3.2) which assigns disjoint bandwidth slices per destination; adapted here by splitting the broadcast tree into per-cloud sub-trees so each cloud's egress budget is not exceeded, reducing redundant cross-cloud hops."
         }}
     ]
 }}
@@ -931,6 +951,7 @@ Example:
                     "what_to_optimize": p.get("what_to_optimize", "score"),
                     "cautions": p.get("cautions", ""),
                     "approach_type": p.get("approach_type", "unknown"),
+                    "attribution": p.get("attribution", "none"),
                 }
             )
 

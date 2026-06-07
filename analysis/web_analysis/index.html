@@ -280,6 +280,56 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .code-block pre { margin: 0; }
 .code-block code { font-family: var(--mono); font-size: 12px; }
 
+/* ── Info tab ────────────────────────────────────────────────── */
+.info-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.info-section {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.info-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--dim);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface3);
+}
+.info-section-body { padding: 10px 12px; }
+.info-row { display: flex; gap: 8px; margin-bottom: 5px; align-items: baseline; flex-wrap: wrap; }
+.info-row:last-child { margin-bottom: 0; }
+.info-label { font-size: 11px; color: var(--dim); min-width: 80px; flex-shrink: 0; }
+.info-value { font-size: 12px; font-family: var(--mono); color: var(--text); word-break: break-all; }
+.info-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.knowledge-paper {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--surface3);
+}
+.knowledge-paper:last-child { border-bottom: none; }
+.knowledge-paper .kp-idx { font-size: 10px; color: var(--dim); font-family: var(--mono); min-width: 20px; }
+.knowledge-paper .kp-title { flex: 1; font-size: 12px; color: var(--text); }
+.knowledge-paper .kp-field { font-size: 10px; color: var(--purple); font-family: var(--mono); }
+.knowledge-paper .kp-sim { font-size: 11px; font-family: var(--mono); color: var(--green); min-width: 42px; text-align: right; }
+.attribution-text {
+  font-size: 12px;
+  color: var(--accent);
+  line-height: 1.6;
+  font-style: italic;
+}
+.attribution-none { color: var(--dim); font-style: italic; font-size: 12px; }
+
 /* ── Reasoning ───────────────────────────────────────────────── */
 .reasoning-panel { padding: 12px 14px; }
 .reasoning-text {
@@ -883,7 +933,8 @@ async function renderDiff(container, codeA, codeB, labelA, labelB) {
 // ──────────────────────────────────────────────────────────────────────────
 // Candidates tab
 // ──────────────────────────────────────────────────────────────────────────
-let cachedPrograms = {}; // keyed by checkpoint path
+let cachedPrograms  = {}; // keyed by checkpoint path
+let iterStatsCache  = {}; // keyed by source_dir → array of stat rows
 
 async function loadCandidates(idx) {
   const cp = checkpoints[idx];
@@ -945,12 +996,16 @@ async function renderProgramDetail(prog) {
     <div class="prog-detail-tabs">
       <button class="tab-btn active" id="pdTabBtnSolution" onclick="switchProgTab('solution')">Solution</button>
       <button class="tab-btn" id="pdTabBtnReasoning" onclick="switchProgTab('reasoning')">Reasoning & Diff</button>
+      <button class="tab-btn" id="pdTabBtnInfo" onclick="switchProgTab('info')">Info</button>
     </div>
     <div class="prog-detail-body" id="pdBodySolution">
       <div class="code-block"><pre><code class="language-python" id="solutionCode"></code></pre></div>
     </div>
     <div class="prog-detail-body" id="pdBodyReasoning" style="display:none;">
       <div class="reasoning-panel" id="reasoningPanel"></div>
+    </div>
+    <div class="prog-detail-body scroll" id="pdBodyInfo" style="display:none;">
+      <div class="info-panel" id="infoPanel"></div>
     </div>`;
 
   // Solution code
@@ -960,13 +1015,186 @@ async function renderProgramDetail(prog) {
 
   // Reasoning
   renderReasoning(prog);
+
+  // Info tab (async — loads iteration stats)
+  renderInfo(prog);
 }
 
 function switchProgTab(tab) {
   document.getElementById('pdTabBtnSolution').classList.toggle('active', tab === 'solution');
   document.getElementById('pdTabBtnReasoning').classList.toggle('active', tab === 'reasoning');
-  document.getElementById('pdBodySolution').style.display  = tab === 'solution'   ? '' : 'none';
-  document.getElementById('pdBodyReasoning').style.display = tab === 'reasoning'  ? '' : 'none';
+  document.getElementById('pdTabBtnInfo').classList.toggle('active', tab === 'info');
+  document.getElementById('pdBodySolution').style.display  = tab === 'solution'  ? '' : 'none';
+  document.getElementById('pdBodyReasoning').style.display = tab === 'reasoning' ? '' : 'none';
+  document.getElementById('pdBodyInfo').style.display      = tab === 'info'      ? '' : 'none';
+}
+
+async function loadIterStats(sourceDir) {
+  if (iterStatsCache[sourceDir] !== undefined) return iterStatsCache[sourceDir];
+  try {
+    const res = await fetch('/api/iteration-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_dir: sourceDir }),
+    });
+    iterStatsCache[sourceDir] = await res.json();
+  } catch {
+    iterStatsCache[sourceDir] = [];
+  }
+  return iterStatsCache[sourceDir];
+}
+
+async function renderInfo(prog) {
+  const panel = document.getElementById('infoPanel');
+  if (!panel) return;
+
+  const cp = checkpoints[selectedIdx];
+  const sourceDir = cp?.source_dir || '';
+
+  // ── Metadata section ──────────────────────────────────────────
+  const meta = prog.metadata || {};
+  const paradigmIdea = meta.paradigm_idea || meta.paradigm || '';
+  const paradigmAttribution = meta.paradigm_attribution || '';
+
+  let metaHtml = `
+    <div class="info-section">
+      <div class="info-section-title">Metadata</div>
+      <div class="info-section-body">
+        <div class="info-row"><span class="info-label">ID</span><span class="info-value">${prog.id || '—'}</span></div>
+        <div class="info-row"><span class="info-label">Parent ID</span><span class="info-value">${prog.parent_id || '—'}</span></div>
+        <div class="info-row"><span class="info-label">Generation</span><span class="info-value">${prog.generation ?? '—'}</span></div>
+        <div class="info-row"><span class="info-label">Iteration</span><span class="info-value">${prog.iteration_found ?? '—'}</span></div>
+        ${paradigmIdea ? `<div class="info-row"><span class="info-label">Paradigm</span><span class="info-value" style="color:var(--yellow)">${escapeHtml(paradigmIdea)}</span></div>` : ''}
+      </div>
+    </div>`;
+
+  // ── Attribution ──────────────────────────────────────────────
+  const knowledgeAttribution = meta.knowledge_attribution || '';
+
+  const iterStats = await loadIterStats(sourceDir);
+  const iterNum2 = prog.iteration_found;
+  const statRow2 = iterStats.find(r => r.iteration === iterNum2 || r.iteration === String(iterNum2));
+  const kr2 = statRow2?.knowledge_retrieve;
+  const hasKnowledge = !!(kr2 && (kr2.n_results > 0));
+
+  // Determine what attribution text to show
+  // Prefer knowledge_attribution (from code LLM) over paradigm_attribution (from paradigm LLM)
+  const attrText = knowledgeAttribution || paradigmAttribution || '';
+  const attrSource = knowledgeAttribution ? 'code' : (paradigmAttribution ? 'paradigm' : '');
+  const isNoneAttr = !attrText || attrText.trim().toLowerCase() === 'none';
+
+  let attributionHtml = '';
+  if (!hasKnowledge) {
+    // No papers were retrieved — nothing to attribute
+    attributionHtml = `
+      <div class="info-section" style="border-color:var(--border)">
+        <div class="info-section-title" style="background:var(--surface3)">Paper Attribution</div>
+        <div class="info-section-body"><span class="attribution-none">No papers were retrieved for this iteration</span></div>
+      </div>`;
+  } else if (isNoneAttr) {
+    attributionHtml = `
+      <div class="info-section" style="border-color:var(--border)">
+        <div class="info-section-title" style="background:var(--surface3)">Paper Attribution</div>
+        <div class="info-section-body"><span class="attribution-none">none — LLM did not draw from any retrieved paper</span></div>
+      </div>`;
+  } else {
+    const sourceLabel = attrSource === 'paradigm' ? ' (paradigm idea)' : '';
+    attributionHtml = `
+      <div class="info-section" style="border-color:var(--accent)">
+        <div class="info-section-title" style="background:rgba(77,171,247,.12)">
+          Paper Attribution${sourceLabel}
+        </div>
+        <div class="info-section-body">
+          <span class="attribution-text">${escapeHtml(attrText)}</span>
+        </div>
+      </div>`;
+  }
+
+  // ── Evaluator feedback ────────────────────────────────────────
+  const artifacts = prog.artifacts || {};
+  const feedback = artifacts.feedback || '';
+  let feedbackHtml = '';
+  if (feedback) {
+    feedbackHtml = `
+      <div class="info-section">
+        <div class="info-section-title">Evaluator Feedback</div>
+        <div class="info-section-body">
+          <div class="info-text">${escapeHtml(feedback)}</div>
+        </div>
+      </div>`;
+  }
+
+  panel.innerHTML = metaHtml + attributionHtml + feedbackHtml +
+    '<div class="info-section" id="knowledgeSection"><div class="info-section-title">Knowledge Retrieved</div><div class="info-section-body" id="knowledgeBody"><span style="color:var(--dim);font-size:12px"><span class="spin"></span> Loading…</span></div></div>';
+
+  // ── Knowledge (reuse already-loaded iteration stats) ─────────
+  const kr = statRow2?.knowledge_retrieve;
+  const kbody = document.getElementById('knowledgeBody');
+  if (!kbody) return;
+
+  if (!kr) {
+    kbody.innerHTML = '<span class="attribution-none">No knowledge retrieval recorded for this iteration</span>';
+    return;
+  }
+
+  const levelColor = { L1: 'var(--yellow)', L2: 'var(--accent)', L3: 'var(--green)' }[kr.level] || 'var(--text)';
+  let kHtml = `<div class="info-row" style="margin-bottom:10px">
+    <span class="info-label">Level</span><span class="info-value" style="color:${levelColor}">${kr.level}</span>
+    <span class="info-label" style="margin-left:12px">Stage</span><span class="info-value">${kr.stage}</span>
+    <span class="info-label" style="margin-left:12px">Injected</span><span class="info-value">${kr.n_results}</span>
+  </div>`;
+
+  const paperRow = (p, i) => {
+    const fname = p.paper_path ? p.paper_path.split('/').pop() : '—';
+    const sim = typeof p.similarity === 'number' ? p.similarity.toFixed(3) : '—';
+    return `<div class="knowledge-paper">
+      <span class="kp-idx">[${i+1}]</span>
+      <span class="kp-title" title="${escapeHtml(p.paper_path || '')}">${escapeHtml(p.title || fname)}<br>
+        <span style="font-size:10px;color:var(--dim)">${escapeHtml(fname)}</span></span>
+      <span class="kp-field">${p.field_type || ''}</span>
+      <span class="kp-sim">${sim}</span>
+    </div>`;
+  };
+
+  // Weighted samples — papers that actually went into the prompt
+  const weighted = kr.weighted_samples || [];
+  if (weighted.length) {
+    kHtml += `<div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Weighted Selected (injected into prompt)</div>
+      ${weighted.map((p, i) => paperRow(p, i)).join('')}
+    </div>`;
+  }
+
+  // Random sample
+  const randoms = kr.random_samples || [];
+  if (randoms.length) {
+    kHtml += `<div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--yellow);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Random Sample</div>
+      ${randoms.map((p, i) => paperRow(p, i)).join('')}
+    </div>`;
+  }
+
+  // Queries per field — collapsible
+  const queries = kr.queries || {};
+  const queryEntries = Object.entries(queries).filter(([, q]) => q);
+  if (queryEntries.length) {
+    const qId = 'kqToggle_' + Date.now();
+    kHtml += `<div style="margin-top:4px">
+      <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.textContent=this.textContent.includes('▶')?'▼ Queries per field':'▶ Queries per field'"
+        style="font-size:10px;padding:2px 8px;background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);cursor:pointer;margin-bottom:4px">
+        ▶ Queries per field
+      </button>
+      <div style="display:none">
+        ${queryEntries.map(([field, q]) => `
+          <div style="margin-bottom:6px">
+            <span style="font-size:10px;color:var(--purple);font-weight:600">${field}</span>
+            <div style="font-size:11px;color:var(--dim);font-style:italic;padding:4px 8px;background:var(--surface3);border-radius:4px;margin-top:2px">"${escapeHtml(q)}"</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  kbody.innerHTML = kHtml;
 }
 
 async function renderReasoning(prog) {

@@ -193,6 +193,7 @@ def api_programs():
                     "parent_id": p.get("parent_id"),
                     "generation": p.get("generation"),
                     "metadata": p.get("metadata", {}),
+                    "artifacts": p.get("artifacts", {}),
                     "solution": p.get("solution", ""),
                     "prompts": p.get("prompts"),
                 }
@@ -209,6 +210,38 @@ def api_programs():
 
     programs.sort(key=_score, reverse=True)
     return jsonify(programs)
+
+
+@app.route("/api/iteration-stats", methods=["POST"])
+def api_iteration_stats():
+    """Return parsed iteration stats JSONL for a run directory."""
+    source_dir = (request.json or {}).get("source_dir", "")
+    if not source_dir:
+        return jsonify([])
+
+    # source_dir may be the output dir or the checkpoints dir — search upward
+    candidates = [source_dir, os.path.dirname(source_dir)]
+    stats = []
+    for search_dir in candidates:
+        if not os.path.isdir(search_dir):
+            continue
+        for fname in os.listdir(search_dir):
+            if fname.startswith("adaevolve_iteration_stats") and fname.endswith(".jsonl"):
+                fpath = os.path.join(search_dir, fname)
+                try:
+                    with open(fpath) as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    stats.append(json.loads(line))
+                                except json.JSONDecodeError:
+                                    pass
+                except Exception:
+                    pass
+                if stats:
+                    return jsonify(stats)
+    return jsonify(stats)
 
 
 @app.route("/api/diff", methods=["POST"])

@@ -12,7 +12,9 @@ llm:
     - name: "glm-4.7"
       weight: 1.0
   max_tokens: 32000
-  timeout: 600
+  timeout: 400
+  retries: 2
+  retry_delay: 0
   reasoning_effort: "medium"
   guide_models:
     - name: "glm-4.7"

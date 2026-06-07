@@ -145,6 +145,19 @@ class KnowledgeEvolve:
             lines.append(content)
             lines.append("")
 
+        lines.append(
+            "## ATTRIBUTION REQUIRED\n"
+            "After writing your solution, add exactly ONE comment line at the very end of the code block:\n"
+            "  # KNOWLEDGE_ATTRIBUTION: <your attribution>\n"
+            "Rules:\n"
+            "- If any paper above motivated or inspired your solution, cite it by [N] and title, "
+            "then briefly explain what concept or technique you borrowed and how you applied it.\n"
+            "  Example: # KNOWLEDGE_ATTRIBUTION: [2] DeDe — adapted its resource-partitioning heuristic "
+            "to split broadcast tree per cloud; [5] Caribou — borrowed geo-routing cost model for link selection\n"
+            "- If none of the papers influenced your solution, write: # KNOWLEDGE_ATTRIBUTION: none\n"
+            "Do NOT skip this line."
+        )
+
         return "\n".join(lines)
 
     async def _digest(
@@ -171,7 +184,8 @@ class KnowledgeEvolve:
                     ),
                 }],
                 temperature=0.5,
-                max_tokens=400,
+                max_tokens=1200,
+                reasoning_effort=None,
             )
             digest = response.text or ""
             return "## KNOWLEDGE INSIGHTS\n\n" + digest

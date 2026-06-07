@@ -16,6 +16,7 @@ Features:
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -388,12 +389,29 @@ class AdaEvolveController(DiscoveryController):
         # Get previously tried ideas for feedback
         previously_tried = self.database.get_previously_tried_ideas()
 
+        # Retrieve paper knowledge for paradigm ideation
+        knowledge_context = None
+        if self.knowledge_evolve:
+            ke_db_config = self.config.search.database
+            if getattr(ke_db_config, "knowledge_use_paradigm", True):
+                try:
+                    knowledge_context = await self.knowledge_evolve.get_context(
+                        task_description=self.config.context_builder.system_message or "",
+                        current_best_score=best_score,
+                        evaluator_feedback=evaluator_feedback,
+                        stage="paradigm",
+                        failed_paradigms=previously_tried,
+                    )
+                except Exception as e:
+                    logger.warning(f"KnowledgeEvolve retrieval for paradigm failed: {e}")
+
         # Generate new paradigms
         paradigms = await self.paradigm_generator.generate(
             current_program_solution=best_solution,
             current_best_score=best_score,
             previously_tried_ideas=previously_tried,
             evaluator_feedback=evaluator_feedback,
+            knowledge_context=knowledge_context or None,
         )
 
         if paradigms:
@@ -577,7 +595,7 @@ class AdaEvolveController(DiscoveryController):
                     (stage == "parent" and getattr(ke_db_config, "knowledge_use_parent", True))
                     or (stage == "paradigm" and getattr(ke_db_config, "knowledge_use_paradigm", True))
                 )
-                if should_use_knowledge:
+                if should_use_knowledge and stage == "parent":
                     try:
                         evaluator_feedback = None
                         if parent.artifacts and isinstance(parent.artifacts, dict):
@@ -593,19 +611,26 @@ class AdaEvolveController(DiscoveryController):
                             failed_paradigms=self.database.get_previously_tried_ideas(),
                         )
                         level = self.knowledge_evolve._determine_level(stage, sampling_mode)
+                        retriever = self.knowledge_evolve.retriever
+
+                        def _paper_info(r):
+                            m = r.get("metadata", {})
+                            return {
+                                "title": m.get("title", ""),
+                                "paper_path": m.get("paper_path", ""),
+                                "field_type": m.get("field_type", ""),
+                                "similarity": round(1.0 - r.get("distance", 0.5), 4),
+                            }
+
+                        random_ids = {r.get("id") for r in retriever.last_random_samples}
+                        weighted = [r for r in self.knowledge_evolve.last_results if r.get("id") not in random_ids]
                         self._last_knowledge_meta = {
                             "stage": stage,
                             "level": level,
                             "n_results": len(self.knowledge_evolve.last_results),
-                            "papers": [
-                                {
-                                    "title": r.get("metadata", {}).get("title", ""),
-                                    "paper_path": r.get("metadata", {}).get("paper_path", ""),
-                                    "field_type": r.get("metadata", {}).get("field_type", ""),
-                                    "similarity": round(1.0 - r.get("distance", 0.5), 4),
-                                }
-                                for r in self.knowledge_evolve.last_results
-                            ],
+                            "queries": retriever.last_queries,
+                            "weighted_samples": [_paper_info(r) for r in weighted],
+                            "random_samples": [_paper_info(r) for r in retriever.last_random_samples],
                         }
                     except Exception as e:
                         logger.warning(f"KnowledgeEvolve retrieval failed: {e}")
@@ -644,6 +669,7 @@ class AdaEvolveController(DiscoveryController):
                 context_info=context_info,
                 context_program_ids=context_program_ids,
                 other_context_programs=context_programs_dict,
+                paradigm=paradigm,
             )
 
         except Exception as e:
@@ -663,6 +689,7 @@ class AdaEvolveController(DiscoveryController):
         context_info: Optional[List[tuple]] = None,
         context_program_ids: Optional[List[str]] = None,
         other_context_programs: Optional[Dict] = None,
+        paradigm: Optional[Dict] = None,
     ) -> SerializableResult:
         """Execute LLM generation and evaluation."""
         start_time = time.time()
@@ -702,6 +729,19 @@ class AdaEvolveController(DiscoveryController):
 
         if not response and self.config.language != "image":
             return SerializableResult(error="Empty LLM response", iteration=iteration)
+
+        # Extract knowledge attribution comment before code parsing
+        knowledge_attribution = None
+        if response and self._last_knowledge_meta:
+            attr_match = re.search(
+                r"#\s*KNOWLEDGE_ATTRIBUTION\s*:\s*(.+)", response, re.IGNORECASE
+            )
+            if attr_match:
+                knowledge_attribution = attr_match.group(1).strip()
+                # Strip the attribution comment from response so it doesn't end up in the solution
+                response = re.sub(
+                    r"\n?#\s*KNOWLEDGE_ATTRIBUTION\s*:.+", "", response, flags=re.IGNORECASE
+                ).rstrip()
 
         # Parse code from response
         if self.config.language == "image":
@@ -762,6 +802,11 @@ class AdaEvolveController(DiscoveryController):
 
         # Build child program with full tracking info
         child_metadata = {"changes": changes, "parent_metrics": parent.metrics}
+        if paradigm:
+            child_metadata["paradigm_idea"] = paradigm.get("idea", "")
+            child_metadata["paradigm_attribution"] = paradigm.get("attribution", "none")
+        if knowledge_attribution is not None:
+            child_metadata["knowledge_attribution"] = knowledge_attribution
         if image_path:
             child_metadata["image_path"] = image_path
         child = Program(
