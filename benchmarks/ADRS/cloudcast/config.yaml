@@ -7,9 +7,9 @@ checkpoint_interval: 1
 max_solution_length: 60000
 
 llm:
-  api_base: https://api.deepseek.com
+  api_base: https://api.int2.net/v1
   models:
-    - name: "deepseek-v4-pro"
+    - name: "glm-4.7"
       weight: 1.0
   max_tokens: 32000
   timeout: 600
@@ -31,7 +31,7 @@ evaluator:
 
 monitor:
   enabled: true
-  summary_api_base: https://api.deepseek.com
-  summary_model: "deepseek-v4-pro"
+  summary_api_base: https://api.int2.net/v1
+  summary_model: "glm-4.7"
 
 log_level: "DEBUG"

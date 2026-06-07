@@ -1,0 +1,1 @@
+- Deepseek-V4-Pro bị overthinking, giải cứ phức tạp hóa, trong khi GLM 4.7 cách giải straightforward -> cảm giác bài 

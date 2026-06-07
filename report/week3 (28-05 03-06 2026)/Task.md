@@ -5,14 +5,18 @@
 		- [x] LLM-SQL ==Dung==
 		- [x] EPLB ==Dung==
 		- [x] Prism ==Dung==
-		- [ ] TXN ==Dung==
+		- [x] TXN ==Dung==
 	- [ ] FrontierCS (30/05)
 		- [ ] CBL ==Minh==
 		- [ ] Multi CBL ==Minh==
 - [ ] Analyze the log (Start in 31/05)
-- [ ] Small tests
-	- [ ] Test Deepseek API requests (speed) (29/05) ==Dung==
-	- [ ] Test GPT API requests (speed) (29/05) ==Dung==
+	- [ ] Check (30/05)
+		- [ ] Is there any problem (about code) with each experiment
+		- [ ] Evolution of Solution of each tasks
+		- [ ] Time to run each task
+- [x] Small tests
+	- [x] Test Deepseek API requests (speed) (29/05) ==Dung==
+	- [x] Test GPT API requests (speed) (29/05) ==Dung==
 - [ ] Big tasks (assign later)
 	- [ ] Understand the Fundamentals of Code ==Minh==
 	- [ ] Read the trace, code, and reasoning, then analyze ==Dung==
