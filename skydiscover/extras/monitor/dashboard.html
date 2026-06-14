@@ -1301,6 +1301,23 @@
     const labelColors = { exploration: 'var(--blue)', exploitation: 'var(--green)', diverge: 'var(--purple)', initial: 'var(--text-dim)' };
     const labelColor = labelColors[label] || 'var(--orange)';
 
+    // Sampling mode badge
+    const modeColors = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)' };
+    const mode = p.sampling_mode || null;
+    const modeHtml = mode ? `<div class="detail-row"><span class="detail-label">Mode:</span><span class="detail-value"><span style="color:${modeColors[mode] || 'var(--text-dim)'};font-weight:600;">${mode}</span></span></div>` : '';
+
+    // Paradigm idea section
+    let paradigmHtml = '';
+    if (p.paradigm_idea) {
+      const attr = p.paradigm_attribution && p.paradigm_attribution !== 'none' ? `<div style="margin-top:4px;font-size:11px;color:var(--text-dim);">Attribution: ${escapeHtml(p.paradigm_attribution)}</div>` : '';
+      paradigmHtml = `
+      <div style="margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--purple);border-radius:4px;">
+        <div style="font-size:11px;color:var(--purple);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">⚡ Breakthrough Paradigm</div>
+        <div style="font-size:12px;line-height:1.5;font-weight:600;">${escapeHtml(p.paradigm_idea)}</div>
+        ${attr}
+      </div>`;
+    }
+
     // Metrics grid
     let metricsHtml = '';
     if (p.metrics && Object.keys(p.metrics).length > 0) {
@@ -1326,10 +1343,12 @@
       <div class="detail-row"><span class="detail-label">Score:</span><span class="detail-value score"><code>${fmt(p.score)}</code></span></div>
       <div class="detail-row"><span class="detail-label">Generation:</span><span class="detail-value"><code>${p.generation || 0}</code></span></div>
       ${p.island != null ? `<div class="detail-row"><span class="detail-label">Island:</span><span class="detail-value"><code>${p.island}</code></span></div>` : ''}
+      ${modeHtml}
       ${hfIndicator}
       <div class="lineage-section detail-row"><span class="detail-label">Parent:</span><span class="detail-value">${parentHtml}</span></div>
       <div class="lineage-section detail-row"><span class="detail-label">Children (${children.length}):</span><span class="detail-value">${childrenHtml}</span></div>
       ${metricsHtml ? '<div style="margin-top:10px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Problem-Specific Metrics</div>' + metricsHtml : ''}
+      ${paradigmHtml}
       <div style="margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;">
         <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">What changed</div>
         <div id="program-summary" class="summary-body" style="font-size:12px;line-height:1.5">${summaryHtml}</div>

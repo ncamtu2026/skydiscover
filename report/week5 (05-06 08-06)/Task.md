@@ -1,0 +1,91 @@
+
+- [ ] Fix code to log detail of evaluation results (==BTM==) (DL 06/06)
+	- When a solution is better than other solutions, we still don't know at which iterations, which moments, or which samples it performs better — we don't really understand *why* this solution produces better results. -> We need to save detailed logs for this.
+- [ ] Experiments (==BTM==) (DL 06/06)
+	- [ ] AdaEvolve
+		- [ ] Cloudcast
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+		- [ ] LLM-SQL
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+		- [ ] TXN
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 2 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+	- [ ] OpenEvolve
+		- [ ] Cloudcast
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+		- [ ] LLM-SQL
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+		- [ ] TXN
+			- [ ] GLM 4.7 (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+			- [ ] Deepseek (DL 05/06)
+				- [ ] reasoning medium: 3 times
+				- [ ] reasoning high: 3 times
+				- [ ] reasoning low: 3 times
+				- [ ] reasoning off: 3 times
+				- [ ] 
+- [ ] Check bugs (==BTM==) (DL 06/06)
+	- [ ] EPLB, TXN often encounter some errors while running but they may not affect the results -> identify them
+- [x] Research Agentic Memory (==DTD==) (DL 06/06) -> Overview
+- [x] Implement Knowledge Evolve (==DTD==) (DL 07/06)
+	- [x] Idea
+	- [x] Data preparation (use data of AIDE Carbon -> create more attributes)
+	- [x] Implement Idea
+- [ ] Causal Analysis on Results (==DTD==) (DL 08/06)
+	- [ ] Implement codebase for automatic causal analysis (for success and failure of solutions)
+	- [ ] Test on AdaEvolve, OpenEvolve
+- [ ] Results Analysis, Results Comparison between different run times, different models (==BTM==) (DL 09/06)
+	- [ ] Clean Report
+	- List of questions:
+		- What are the successful improvements? (solution, algorithm)
+		- What led to the successful improvements? (based on previous solution, diversity sampling, ...) -> read reasoning
+		- When does stagnation occur? (wrong solution, implementation, ...)
+		- Compare Deepseek and GLM 4.7 -> Which model produces better solutions? Why is it better (better thinking direction or something else?)? How can the other model also achieve that performance level -> what is that model's gap?
+		- Some more questions, ...

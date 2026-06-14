@@ -80,3 +80,7 @@ examples
 profiles
 paths
 tests/api/response_*.txt
+
+# Server logs & data
+benchmarks/log_from_server/
+*.csv

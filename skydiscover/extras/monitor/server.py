@@ -168,6 +168,116 @@ class MonitorServer:
         """Enqueue an event for broadcast to all connected WebSocket clients."""
         self._queue.put_nowait(event)
 
+    def load_from_checkpoint(self, checkpoint_dir: str) -> int:
+        """Pre-populate server state from a saved checkpoint directory.
+
+        Reads all program JSON files under <checkpoint_dir>/programs/, reconstructs
+        the prog_data dicts (same shape as callback.py produces), and populates the
+        in-memory _programs list so new dashboard clients see historical data
+        immediately.  Call this before start().
+
+        Returns the number of programs loaded.
+        """
+        programs_dir = Path(checkpoint_dir) / "programs"
+        if not programs_dir.is_dir():
+            logger.warning(f"load_from_checkpoint: no programs/ dir in {checkpoint_dir}")
+            return 0
+
+        raw_programs: list = []
+        for fpath in programs_dir.glob("*.json"):
+            try:
+                with open(fpath) as f:
+                    d = json.load(f)
+                raw_programs.append(d)
+            except Exception as e:
+                logger.debug(f"Skipping {fpath}: {e}")
+
+        # Build id→program lookup for parent score resolution
+        by_id = {d["id"]: d for d in raw_programs}
+
+        # Sort by iteration_found ascending for correct ordering in the plot
+        raw_programs.sort(key=lambda d: d.get("iteration_found", 0))
+
+        best_score = -float("inf")
+        best_id = None
+
+        for d in raw_programs:
+            pid = d["id"]
+            metrics = d.get("metrics") or {}
+            score = metrics.get("combined_score", 0.0)
+            if not isinstance(score, (int, float)):
+                score = 0.0
+
+            parent_id = d.get("parent_id")
+            parent_score = None
+            parent_iter = None
+            parent_solution = ""
+            if parent_id and parent_id in by_id:
+                pd = by_id[parent_id]
+                pm = pd.get("metrics") or {}
+                parent_score = pm.get("combined_score")
+                parent_iter = pd.get("iteration_found")
+                parent_solution = pd.get("solution", "")
+
+            context_ids = d.get("other_context_ids") or []
+            context_scores = []
+            for cid in context_ids:
+                cp = by_id.get(cid)
+                if cp and cp.get("metrics"):
+                    context_scores.append(cp["metrics"].get("combined_score"))
+                else:
+                    context_scores.append(None)
+
+            md = d.get("metadata") or {}
+            island = md.get("island")
+            paradigm_idea = md.get("paradigm_idea") or None
+            paradigm_attribution = md.get("paradigm_attribution") or None
+            sampling_mode = md.get("sampling_mode") or None
+
+            solution = d.get("solution", "") or ""
+
+            if score > best_score:
+                best_score = score
+                best_id = pid
+
+            prog_data = {
+                "id": pid,
+                "iteration": d.get("iteration_found", 0),
+                "score": score,
+                "metrics": {k: v for k, v in metrics.items() if isinstance(v, (int, float, str, bool, type(None)))},
+                "parent_id": parent_id,
+                "parent_score": parent_score,
+                "parent_iter": parent_iter,
+                "context_ids": context_ids,
+                "context_scores": context_scores,
+                "label_type": "unknown",
+                "solution_snippet": solution[:500],
+                "island": island,
+                "is_best": False,  # set below
+                "generation": d.get("generation", 0),
+                "image_path": md.get("image_path"),
+                "human_feedback_active": False,
+                "paradigm_idea": paradigm_idea,
+                "paradigm_attribution": paradigm_attribution,
+                "sampling_mode": sampling_mode,
+            }
+            self._programs.append(prog_data)
+            self._program_solutions[pid] = solution
+            if parent_solution:
+                self._parent_solutions[pid] = parent_solution
+
+        # Mark best
+        if best_id:
+            self._best_program_id = best_id
+            self._best_score = best_score
+            for p in self._programs:
+                if p["id"] == best_id:
+                    p["is_best"] = True
+
+        n = len(raw_programs)
+        logger.info(f"load_from_checkpoint: loaded {n} programs from {checkpoint_dir}")
+        return n
+
     def set_config_summary(self, summary: str) -> None:
         """Set a human-readable config summary sent to new dashboard clients."""
         self._config_summary = summary

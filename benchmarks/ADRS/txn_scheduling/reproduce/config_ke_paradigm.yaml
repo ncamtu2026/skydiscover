@@ -1,5 +1,4 @@
-# Transaction Scheduling — Minimize makespan for database workloads
-# Usage: skydiscover-run initial_program.py evaluator.py -c config.yaml -s <strategy>
+# Transaction Scheduling — knowledge evolve on paradigm only
 language: python
 diff_based_generation: true
 max_iterations: 100
@@ -12,7 +11,7 @@ llm:
     - name: "glm-4.7"
       weight: 1.0
   max_tokens: 32000
-  timeout: 600
+  timeout: 800
   reasoning_effort: "medium"
   guide_models:
     - name: "glm-4.7"
@@ -56,7 +55,7 @@ search:
   type: adaevolve
   database:
     use_knowledge_evolve: true
-    knowledge_use_parent: true
+    knowledge_use_parent: false
     knowledge_use_paradigm: true
 
 knowledge:

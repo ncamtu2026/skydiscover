@@ -98,6 +98,7 @@ class AdaEvolveController(DiscoveryController):
 
         # KnowledgeEvolve (optional RAG module)
         self._last_knowledge_meta: Optional[Dict] = None
+        self._last_paradigm_knowledge_meta: Optional[Dict] = None
         self.knowledge_evolve: Optional[KnowledgeEvolve] = None
         db_config = self.config.search.database
         if getattr(db_config, "use_knowledge_evolve", False):
@@ -114,6 +115,22 @@ class AdaEvolveController(DiscoveryController):
             except Exception as e:
                 logger.warning(f"KnowledgeEvolve init failed, disabling: {e}")
                 self.knowledge_evolve = None
+
+        # ExperienceGraph (optional solution tree module)
+        self.experience_graph = None
+        if getattr(db_config, "use_experience_graph", False):
+            try:
+                from skydiscover.experience_graph.experience_graph import ExperienceGraph
+                eg_llm_pool = LLMPool(self.config.llm.experience_graph_models)
+                self.experience_graph = ExperienceGraph(
+                    config=self.config.experience_graph,
+                    llm_pool=eg_llm_pool,
+                    output_dir=self.output_dir,
+                )
+                logger.info(f"ExperienceGraph enabled (output_dir={self.output_dir})")
+            except Exception as e:
+                logger.warning(f"ExperienceGraph init failed, disabling: {e}")
+                self.experience_graph = None
 
         # JSON logging for comprehensive AdaEvolve stats
         self._iteration_stats_log_path: Optional[str] = None
@@ -217,6 +234,11 @@ class AdaEvolveController(DiscoveryController):
                 stats["knowledge_retrieve"] = self._last_knowledge_meta
                 self._last_knowledge_meta = None
 
+            # Add paradigm knowledge retrieval info if available
+            if self._last_paradigm_knowledge_meta is not None:
+                stats["paradigm_knowledge_retrieve"] = self._last_paradigm_knowledge_meta
+                self._last_paradigm_knowledge_meta = None
+
             # Add iteration-specific info
             stats["iteration_result"] = {
                 "success": error is None,
@@ -286,6 +308,13 @@ class AdaEvolveController(DiscoveryController):
         logger.info("AdaEvolve completed")
         self.database.log_status()
 
+        # ExperienceGraph: save final snapshot
+        if self.experience_graph is not None:
+            try:
+                self.experience_graph.save_shutdown(iteration=start_iteration + max_iterations)
+            except Exception as e:
+                logger.warning(f"ExperienceGraph shutdown save failed: {e}")
+
         # Log final summary and stats file location
         if self._iteration_stats_log_path:
             logger.info(f"AdaEvolve iteration stats saved to: {self._iteration_stats_log_path}")
@@ -352,6 +381,27 @@ class AdaEvolveController(DiscoveryController):
             )
         else:
             self._process_result(result, iteration, checkpoint_callback)
+
+            # ExperienceGraph: record this solution in the exploration tree
+            if self.experience_graph is not None and result.child_program_dict:
+                try:
+                    child = Program(**result.child_program_dict)
+                    eg_score = self.database.get_program_proxy_score(child)
+                    changes = child.metadata.get("changes", "") if child.metadata else ""
+                    paradigm_idea = child.metadata.get("paradigm_idea") if child.metadata else None
+                    eg_rationale = (
+                        f"{changes} [PARADIGM: {paradigm_idea}]" if paradigm_idea else changes
+                    )
+                    await self.experience_graph.insert(
+                        solution_id=child.id,
+                        score=eg_score,
+                        rationale=eg_rationale,
+                        is_paradigm_breakthrough=bool(paradigm_idea),
+                        iteration=iteration,
+                    )
+                except Exception as e:
+                    logger.warning(f"ExperienceGraph insert failed: {e}")
+
             # Log successful iteration stats
             self._log_iteration_stats(
                 iteration=iteration,
@@ -402,8 +452,42 @@ class AdaEvolveController(DiscoveryController):
                         stage="paradigm",
                         failed_paradigms=previously_tried,
                     )
+                    # Save paradigm KE papers for iteration stats logging
+                    try:
+                        retriever = self.knowledge_evolve.retriever
+                        random_ids = {r.get("id") for r in retriever.last_random_samples}
+
+                        def _pinfo(r):
+                            m = r.get("metadata", {})
+                            return {
+                                "title": m.get("title", ""),
+                                "paper_path": m.get("paper_path", ""),
+                                "field_type": m.get("field_type", ""),
+                                "similarity": round(1.0 - r.get("distance", 0.5), 4),
+                            }
+
+                        self._last_paradigm_knowledge_meta = {
+                            "stage": "paradigm",
+                            "n_results": len(self.knowledge_evolve.last_results),
+                            "weighted_samples": [_pinfo(r) for r in self.knowledge_evolve.last_results if r.get("id") not in random_ids],
+                            "random_samples": [_pinfo(r) for r in retriever.last_random_samples],
+                        }
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.warning(f"KnowledgeEvolve retrieval for paradigm failed: {e}")
+
+        # ExperienceGraph: get exploration map summary for paradigm context (if enabled)
+        experience_graph_summary = None
+        if self.experience_graph is not None and getattr(
+            self.database.config, "experience_graph_use_paradigm", True
+        ):
+            try:
+                experience_graph_summary = await self.experience_graph.summarize(
+                    iteration=self.database.get_iteration() if hasattr(self.database, "get_iteration") else 0
+                ) or None
+            except Exception as e:
+                logger.warning(f"ExperienceGraph summarize failed: {e}")
 
         # Generate new paradigms
         paradigms = await self.paradigm_generator.generate(
@@ -412,6 +496,7 @@ class AdaEvolveController(DiscoveryController):
             previously_tried_ideas=previously_tried,
             evaluator_feedback=evaluator_feedback,
             knowledge_context=knowledge_context or None,
+            experience_graph_summary=experience_graph_summary,
         )
 
         if paradigms:
@@ -814,7 +899,11 @@ class AdaEvolveController(DiscoveryController):
             )
 
         # Build child program with full tracking info
-        child_metadata = {"changes": changes, "parent_metrics": parent.metrics}
+        child_metadata = {
+            "changes": changes,
+            "parent_metrics": parent.metrics,
+            "sampling_mode": self._last_sampling_mode or "balanced",
+        }
         if paradigm:
             child_metadata["paradigm_idea"] = paradigm.get("idea", "")
             child_metadata["paradigm_attribution"] = paradigm.get("attribution", "none")

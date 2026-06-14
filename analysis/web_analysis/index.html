@@ -31,6 +31,8 @@
   --red:      #f03e3e;
   --yellow:   #fab005;
   --purple:   #cc5de8;
+  --blue:     #339af0;
+  --cyan:     #22b8cf;
   --radius:   6px;
   --mono:     'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
@@ -329,6 +331,33 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-style: italic;
 }
 .attribution-none { color: var(--dim); font-style: italic; font-size: 12px; }
+.mode-badge {
+  display: inline-block;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #0c1015;
+}
+.paradigm-box {
+  border: 1px solid var(--purple);
+  border-radius: var(--radius);
+  background: rgba(204,93,232,.08);
+  padding: 10px 12px;
+  margin-top: 4px;
+}
+.paradigm-box .paradigm-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--purple);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-bottom: 6px;
+}
+.paradigm-box .paradigm-text { font-size: 12px; color: var(--text); line-height: 1.5; }
 
 /* ── Reasoning ───────────────────────────────────────────────── */
 .reasoning-panel { padding: 12px 14px; }
@@ -961,14 +990,30 @@ function renderProgList(programs) {
   const list = document.getElementById('progList');
   list.innerHTML = '';
 
+  const modeColors = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)' };
+
   programs.forEach((prog, i) => {
     const m = prog.metrics || {};
     const score = m.combined_score ?? Math.max(...Object.values(m).filter(v => typeof v === 'number'), 0);
+    const md = prog.metadata || {};
+    const mode = md.sampling_mode;
+    const isParadigm = !!(md.paradigm_idea);
+
+    const modeHtml = mode
+      ? `<span class="mode-badge" style="background:${modeColors[mode] || 'var(--border)'}">${mode}</span>`
+      : '';
+    const paradigmHtml = isParadigm
+      ? `<span class="mode-badge" style="background:var(--purple);color:#fff">⚡ paradigm</span>`
+      : '';
+
     const div = document.createElement('div');
     div.className = 'prog-item';
     div.dataset.progIdx = i;
     div.innerHTML = `
-      <div class="prog-score">${typeof score === 'number' ? score.toFixed(2) : '—'}</div>
+      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:2px">
+        <span class="prog-score">${typeof score === 'number' ? score.toFixed(2) : '—'}</span>
+        ${modeHtml}${paradigmHtml}
+      </div>
       <div class="prog-meta">gen ${prog.generation ?? '?'} · iter ${prog.iteration_found ?? '?'}</div>
       <div class="prog-meta" style="color:var(--dim)">${Object.entries(m).filter(([k]) => k !== 'combined_score').map(([k,v]) => `${k}: ${typeof v === 'number' ? v.toFixed(2) : v}`).join(' · ')}</div>`;
     div.addEventListener('click', () => selectProgram(prog, div));
@@ -1055,6 +1100,21 @@ async function renderInfo(prog) {
   const meta = prog.metadata || {};
   const paradigmIdea = meta.paradigm_idea || meta.paradigm || '';
   const paradigmAttribution = meta.paradigm_attribution || '';
+  const samplingMode = meta.sampling_mode || '';
+
+  const modeColorMap = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)' };
+  const modeBadgeHtml = samplingMode
+    ? `<span class="mode-badge" style="background:${modeColorMap[samplingMode] || 'var(--border)'}">${samplingMode}</span>`
+    : '<span style="color:var(--dim);font-size:12px">—</span>';
+
+  const paradigmBoxHtml = paradigmIdea ? `
+    <div class="paradigm-box">
+      <div class="paradigm-title">⚡ Breakthrough Paradigm</div>
+      <div class="paradigm-text">${escapeHtml(paradigmIdea)}</div>
+      ${paradigmAttribution && paradigmAttribution.toLowerCase() !== 'none'
+        ? `<div style="margin-top:6px;font-size:11px;color:var(--dim)">Attribution: <span style="color:var(--accent);font-style:italic">${escapeHtml(paradigmAttribution)}</span></div>`
+        : ''}
+    </div>` : '';
 
   let metaHtml = `
     <div class="info-section">
@@ -1064,7 +1124,9 @@ async function renderInfo(prog) {
         <div class="info-row"><span class="info-label">Parent ID</span><span class="info-value">${prog.parent_id || '—'}</span></div>
         <div class="info-row"><span class="info-label">Generation</span><span class="info-value">${prog.generation ?? '—'}</span></div>
         <div class="info-row"><span class="info-label">Iteration</span><span class="info-value">${prog.iteration_found ?? '—'}</span></div>
-        ${paradigmIdea ? `<div class="info-row"><span class="info-label">Paradigm</span><span class="info-value" style="color:var(--yellow)">${escapeHtml(paradigmIdea)}</span></div>` : ''}
+        <div class="info-row"><span class="info-label">Mode</span><span class="info-value">${modeBadgeHtml}</span></div>
+        <div class="info-row"><span class="info-label">Origin</span><span class="info-value" style="color:${paradigmIdea ? 'var(--purple)' : 'var(--dim)'}">${paradigmIdea ? '⚡ breakthrough paradigm' : 'parent evolution'}</span></div>
+        ${paradigmBoxHtml}
       </div>
     </div>`;
 
@@ -1074,7 +1136,7 @@ async function renderInfo(prog) {
   const iterStats = await loadIterStats(sourceDir);
   const iterNum2 = prog.iteration_found;
   const statRow2 = iterStats.find(r => r.iteration === iterNum2 || r.iteration === String(iterNum2));
-  const kr2 = statRow2?.knowledge_retrieve;
+  const kr2 = statRow2?.knowledge_retrieve || statRow2?.paradigm_knowledge_retrieve;
   const hasKnowledge = !!(kr2 && (kr2.n_results > 0));
 
   // Determine what attribution text to show
@@ -1128,21 +1190,41 @@ async function renderInfo(prog) {
     '<div class="info-section" id="knowledgeSection"><div class="info-section-title">Knowledge Retrieved</div><div class="info-section-body" id="knowledgeBody"><span style="color:var(--dim);font-size:12px"><span class="spin"></span> Loading…</span></div></div>';
 
   // ── Knowledge (reuse already-loaded iteration stats) ─────────
-  const kr = statRow2?.knowledge_retrieve;
+  // Check both parent-stage and paradigm-stage knowledge retrieval
+  const kr = statRow2?.knowledge_retrieve || statRow2?.paradigm_knowledge_retrieve;
+  const pkr = statRow2?.paradigm_knowledge_retrieve;
   const kbody = document.getElementById('knowledgeBody');
   if (!kbody) return;
 
-  if (!kr) {
+  if (!kr && !pkr) {
     kbody.innerHTML = '<span class="attribution-none">No knowledge retrieval recorded for this iteration</span>';
     return;
   }
 
-  const levelColor = { L1: 'var(--yellow)', L2: 'var(--accent)', L3: 'var(--green)' }[kr.level] || 'var(--text)';
-  let kHtml = `<div class="info-row" style="margin-bottom:10px">
-    <span class="info-label">Level</span><span class="info-value" style="color:${levelColor}">${kr.level}</span>
-    <span class="info-label" style="margin-left:12px">Stage</span><span class="info-value">${kr.stage}</span>
-    <span class="info-label" style="margin-left:12px">Injected</span><span class="info-value">${kr.n_results}</span>
-  </div>`;
+  // Build sections for each available retrieval stage
+  let kHtml = '';
+
+  const buildKrSection = (kdata, stageLabel, headerColor) => {
+    const levelColor = { L1: 'var(--yellow)', L2: 'var(--accent)', L3: 'var(--green)' }[kdata.level] || 'var(--text)';
+    let html = `<div style="font-size:10px;font-weight:700;color:${headerColor};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${stageLabel}</div>`;
+    html += `<div class="info-row" style="margin-bottom:10px">
+      <span class="info-label">Level</span><span class="info-value" style="color:${levelColor}">${kdata.level || '—'}</span>
+      <span class="info-label" style="margin-left:12px">Stage</span><span class="info-value">${kdata.stage || stageLabel}</span>
+      <span class="info-label" style="margin-left:12px">Injected</span><span class="info-value">${kdata.n_results ?? '—'}</span>
+    </div>`;
+    return html;
+  };
+
+  let activeKr = kr;
+  if (statRow2?.knowledge_retrieve) {
+    kHtml += buildKrSection(statRow2.knowledge_retrieve, 'Parent Stage', 'var(--accent)');
+    activeKr = statRow2.knowledge_retrieve;
+  }
+  if (pkr) {
+    kHtml += buildKrSection(pkr, 'Paradigm Stage', 'var(--purple)');
+    // Show paradigm papers below if no parent KR (paradigm-only iteration)
+    if (!statRow2?.knowledge_retrieve) activeKr = pkr;
+  }
 
   const paperRow = (p, i) => {
     const fname = p.paper_path ? p.paper_path.split('/').pop() : '—';
@@ -1157,7 +1239,7 @@ async function renderInfo(prog) {
   };
 
   // Weighted samples — papers that actually went into the prompt
-  const weighted = kr.weighted_samples || [];
+  const weighted = activeKr.weighted_samples || [];
   if (weighted.length) {
     kHtml += `<div style="margin-bottom:10px">
       <div style="font-size:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Weighted Selected (injected into prompt)</div>
@@ -1166,7 +1248,7 @@ async function renderInfo(prog) {
   }
 
   // Random sample
-  const randoms = kr.random_samples || [];
+  const randoms = activeKr.random_samples || [];
   if (randoms.length) {
     kHtml += `<div style="margin-bottom:10px">
       <div style="font-size:10px;font-weight:700;color:var(--yellow);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Random Sample</div>
@@ -1175,7 +1257,7 @@ async function renderInfo(prog) {
   }
 
   // Queries per field — collapsible
-  const queries = kr.queries || {};
+  const queries = activeKr.queries || {};
   const queryEntries = Object.entries(queries).filter(([, q]) => q);
   if (queryEntries.length) {
     const qId = 'kqToggle_' + Date.now();

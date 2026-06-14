@@ -177,8 +177,12 @@ def _to_monitor_format(prog: Dict, all_progs: Dict[str, Dict]) -> Dict:
     if label_type == "unknown":
         label_type = (prog.get("metadata") or {}).get("label_type", "unknown")
 
-    island = (prog.get("metadata") or {}).get("island")
-    image_path = (prog.get("metadata") or {}).get("image_path")
+    md = prog.get("metadata") or {}
+    island = md.get("island")
+    image_path = md.get("image_path")
+    paradigm_idea = md.get("paradigm_idea") or None
+    paradigm_attribution = md.get("paradigm_attribution") or None
+    sampling_mode = md.get("sampling_mode") or None
     solution = prog.get("solution", "")
 
     from skydiscover.extras.monitor.callback import _safe_metrics
@@ -198,6 +202,9 @@ def _to_monitor_format(prog: Dict, all_progs: Dict[str, Dict]) -> Dict:
         "island": island,
         "generation": prog.get("generation", 0),
         "image_path": image_path,
+        "paradigm_idea": paradigm_idea,
+        "paradigm_attribution": paradigm_attribution,
+        "sampling_mode": sampling_mode,
     }
 
 

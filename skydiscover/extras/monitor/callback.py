@@ -85,6 +85,9 @@ def _push_program_event(
         label_type = md.get("label_type", "unknown")
 
     island = md.get("island")
+    paradigm_idea = md.get("paradigm_idea") or None
+    paradigm_attribution = md.get("paradigm_attribution") or None
+    sampling_mode = md.get("sampling_mode") or None
 
     is_best = getattr(database, "best_program_id", None) == program.id
 
@@ -125,6 +128,9 @@ def _push_program_event(
         "is_best": is_best,
         "generation": getattr(program, "generation", 0),
         "image_path": image_path,
+        "paradigm_idea": paradigm_idea,
+        "paradigm_attribution": paradigm_attribution,
+        "sampling_mode": sampling_mode,
     }
 
     stats = {

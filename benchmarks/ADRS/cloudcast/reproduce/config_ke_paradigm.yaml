@@ -1,0 +1,55 @@
+# CloudCast — knowledge evolve on paradigm only
+language: python
+diff_based_generation: true
+max_iterations: 100
+checkpoint_interval: 1
+max_solution_length: 60000
+
+llm:
+  api_base: https://api.int2.net/v1
+  models:
+    - name: "glm-4.7"
+      weight: 1.0
+  max_tokens: 32000
+  timeout: 800
+  retries: 2
+  retry_delay: 0
+  reasoning_effort: "medium"
+  guide_models:
+    - name: "glm-4.7"
+      weight: 1.0
+
+prompt:
+  system_message: |-
+    You are an expert in cloud infrastructure optimization. Your task is to evolve the
+    search_algorithm(src, dsts, G, num_partitions) function to minimize overall
+    data transfer cost across multiple clouds.
+    Focus on efficiently broadcasting input data to multiple destination nodes by leveraging
+    parallel paths and overlapping transfers across networks. Use the BroadCastTopology
+    class and make_nx_graph function to identify low-cost routes.
+    Prioritize strategies that reduce redundant transfers, balance load across networks,
+    and exploit multi-network topologies to minimize cost.
+
+evaluator:
+  timeout: 60
+
+monitor:
+  enabled: true
+  summary_api_base: https://api.int2.net/v1
+  summary_model: "glm-4.7"
+
+log_level: "DEBUG"
+
+search:
+  type: adaevolve
+  database:
+    use_knowledge_evolve: true
+    knowledge_use_parent: false
+    knowledge_use_paradigm: true
+
+knowledge:
+  embedding_backend: openai
+  openai_embedding_model: text-embedding-3-small
+  chroma_persist_dir: /Users/iscrea/Projects/BigVault/Code/skydiscover/chroma_db
+  collection_name: knowledge_base
+  output_mode: raw_text

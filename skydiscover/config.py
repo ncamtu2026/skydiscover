@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import yaml
 
+from skydiscover.experience_graph.config import ExperienceGraphConfig
 from skydiscover.knowledge.config import KnowledgeEvolveConfig
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,10 @@ class LLMConfig(LLMModelConfig):
     # If not specified, falls back to using the main 'models' list
     guide_models: List[LLMModelConfig] = field(default_factory=lambda: [])
 
+    # model(s) for ExperienceGraph LLM calls (insert classification, leaf grouping)
+    # If not specified, falls back to guide_models
+    experience_graph_models: List[LLMModelConfig] = field(default_factory=lambda: [])
+
     # Reasoning parameters (inherited from LLMModelConfig but can be overridden)
     reasoning_effort: Optional[str] = None
 
@@ -190,13 +195,17 @@ class LLMConfig(LLMModelConfig):
         if not self.guide_models:
             self.guide_models = self.models.copy()
 
+        # If no experience_graph models are defined, fall back to guide_models
+        if not self.experience_graph_models:
+            self.experience_graph_models = self.guide_models.copy()
+
         # Resolve per-model api_base, api_key, and bare name from provider prefix
         # Check if user explicitly set api_base at the LLMConfig level
         # (i.e. it differs from the hardcoded default).  When a custom api_base
         # is provided, we should NOT override it with the provider default so
         # that update_model_params() below can propagate the user's value.
         user_set_api_base = self.api_base.rstrip("/") != _PROVIDERS["openai"][0].rstrip("/")
-        for model in self.models + self.evaluator_models + self.guide_models:
+        for model in self.models + self.evaluator_models + self.guide_models + self.experience_graph_models:
             if model.name and model.api_base is None:
                 provider, bare_name, provider_base, env_vars = _parse_model_spec(model.name)
                 # Skip provider URL only for unrecognized bare names that fell
@@ -230,7 +239,7 @@ class LLMConfig(LLMModelConfig):
 
     def update_model_params(self, args: Dict[str, Any], overwrite: bool = False) -> None:
         """Update model parameters for all models (including guide_models)."""
-        all_models = self.models + self.evaluator_models + self.guide_models
+        all_models = self.models + self.evaluator_models + self.guide_models + self.experience_graph_models
         for model in all_models:
             for key, value in args.items():
                 if overwrite or getattr(model, key, None) is None:
@@ -439,6 +448,10 @@ class AdaEvolveDatabaseConfig(DatabaseConfig):
     knowledge_use_parent: bool = True
     knowledge_use_paradigm: bool = True
 
+    # ExperienceGraph integration flags
+    use_experience_graph: bool = False          # build + save the tree (insert every solution)
+    experience_graph_use_paradigm: bool = True  # pass tree summary to paradigm generator
+
     # Sibling context
     sibling_context_limit: int = 5
 
@@ -615,6 +628,9 @@ class Config:
     # KnowledgeEvolve RAG module
     knowledge: KnowledgeEvolveConfig = field(default_factory=KnowledgeEvolveConfig)
 
+    # ExperienceGraph solution tree module
+    experience_graph: ExperienceGraphConfig = field(default_factory=ExperienceGraphConfig)
+
     # Human feedback settings
     human_feedback_enabled: bool = False
     human_feedback_file: Optional[str] = None
@@ -697,6 +713,10 @@ class Config:
                 ]
             if "guide_models" in llm_dict:
                 llm_dict["guide_models"] = [LLMModelConfig(**m) for m in llm_dict["guide_models"]]
+            if "experience_graph_models" in llm_dict:
+                llm_dict["experience_graph_models"] = [
+                    LLMModelConfig(**m) for m in llm_dict["experience_graph_models"]
+                ]
             config.llm = LLMConfig(**llm_dict)
         if "prompt" in config_dict:
             config.context_builder = ContextBuilderConfig(**config_dict["prompt"])
@@ -740,6 +760,8 @@ class Config:
             config.monitor = MonitorConfig(**config_dict["monitor"])
         if "knowledge" in config_dict:
             config.knowledge = KnowledgeEvolveConfig(**config_dict["knowledge"])
+        if "experience_graph" in config_dict:
+            config.experience_graph = ExperienceGraphConfig(**config_dict["experience_graph"])
 
         return config
 
@@ -827,6 +849,11 @@ class Config:
             "knowledge": {
                 f.name: getattr(self.knowledge, f.name)
                 for f in fields(self.knowledge)
+            },
+            # ExperienceGraph
+            "experience_graph": {
+                f.name: getattr(self.experience_graph, f.name)
+                for f in fields(self.experience_graph)
             },
         }
 

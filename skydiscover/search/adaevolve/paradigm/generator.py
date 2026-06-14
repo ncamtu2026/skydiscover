@@ -112,6 +112,7 @@ class ParadigmGenerator:
         previously_tried_ideas: Optional[List[str]] = None,
         evaluator_feedback: Optional[str] = None,
         knowledge_context: Optional[str] = None,
+        experience_graph_summary: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Generate breakthrough paradigms with retry logic.
@@ -132,6 +133,7 @@ class ParadigmGenerator:
             previously_tried_ideas or [],
             evaluator_feedback=evaluator_feedback,
             knowledge_context=knowledge_context,
+            experience_graph_summary=experience_graph_summary,
         )
 
         last_error = None
@@ -263,6 +265,7 @@ class ParadigmGenerator:
         previously_tried: List[str],
         evaluator_feedback: Optional[str] = None,
         knowledge_context: Optional[str] = None,
+        experience_graph_summary: Optional[str] = None,
     ) -> str:
         """Build the full prompt for paradigm generation."""
         if self._is_prompt_optimization:
@@ -281,7 +284,7 @@ class ParadigmGenerator:
                 self._build_analysis_framework(best_score),
                 self._build_previously_tried_section(previously_tried),
                 self._build_techniques_section(),
-                self._build_output_format_section(),
+                self._build_output_format_section(has_knowledge=bool(knowledge_context)),
             ]
 
         if evaluator_feedback:
@@ -309,6 +312,17 @@ class ParadigmGenerator:
                 f"strategy; adapted it here to prune low-bandwidth inter-cloud links before running "
                 f"the broadcast tree, reducing search space by ~60%.'\n"
                 f"If an idea is entirely original and not paper-inspired, write \"none\".",
+            )
+
+        if experience_graph_summary and not self._is_prompt_optimization:
+            sections.insert(
+                -1,
+                f"## Exploration Map (Experience Graph)\n\n"
+                f"The following is a hierarchical map of ALL solution approaches explored so far, "
+                f"organized by algorithmic direction. Paradigm breakthrough solutions are marked [PARADIGM].\n"
+                f"Use this to identify under-explored branches and avoid regenerating approaches "
+                f"already thoroughly tried at the mechanism level.\n\n"
+                f"{experience_graph_summary}",
             )
 
         return "\n\n".join(sections)
@@ -614,10 +628,29 @@ Specific: "Use scipy.optimize.minimize with SLSQP method"
 - Concrete visual descriptions beat abstract concepts
 - Structural prompt changes (reordering, sectioning) often help more than adding words"""
 
-    def _build_output_format_section(self) -> str:
+    def _build_output_format_section(self, has_knowledge: bool = False) -> str:
         """Build the output format section."""
         if self._is_image_mode:
             return self._build_image_output_format_section()
+
+        if has_knowledge:
+            attribution_instruction = (
+                '"attribution": If the idea was inspired by any of the papers above, '
+                'cite them by "[N] Title" then explain (a) the specific concept/method drawn from each, '
+                'and (b) how it was adapted to this problem. Write "none" if entirely original.'
+            )
+            attribution_example = (
+                '"attribution": "[2] DeDe: A General Framework — drew on its resource-partitioning '
+                "heuristic (§3.2) which assigns disjoint bandwidth slices per destination; adapted here "
+                'by splitting the broadcast tree into per-cloud sub-trees so each cloud\'s egress budget '
+                'is not exceeded, reducing redundant cross-cloud hops."'
+            )
+        else:
+            attribution_instruction = (
+                '"attribution": No papers were provided — always write "none".'
+            )
+            attribution_example = '"attribution": "none"'
+
         return f"""## Output Format
 
 **IMPORTANT:** Respond with a JSON object containing exactly {self.num_paradigms} idea objects under the "ideas" key.
@@ -631,7 +664,7 @@ Each idea must be a JSON object with these fields:
 - "what_to_optimize": What metrics/areas to focus on
 - "cautions": Important implementation details to watch for
 - "approach_type": Exact "library.function" format (e.g., "scipy.optimize.minimize")
-- "attribution": If paper-inspired: cite paper(s) by "[N] Title" then explain (a) the specific concept/method drawn from each, and (b) how it was adapted to this problem. Write "none" if entirely original.
+- {attribution_instruction}
 
 **Diversity Requirement:** Each idea must use a DIFFERENT approach type.
 Do not generate variations of the same technique.
@@ -648,7 +681,7 @@ Example:
             "what_to_optimize": "{', '.join(self.objective_names) if self.objective_names else 'primary evaluator score'}",
             "cautions": "Ensure constraints are properly formulated, use multiple starting points",
             "approach_type": "scipy.optimize.minimize",
-            "attribution": "[2] DeDe: A General Framework — drew on its resource-partitioning heuristic (§3.2) which assigns disjoint bandwidth slices per destination; adapted here by splitting the broadcast tree into per-cloud sub-trees so each cloud's egress budget is not exceeded, reducing redundant cross-cloud hops."
+            {attribution_example}
         }}
     ]
 }}
