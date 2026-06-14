@@ -16,7 +16,8 @@ class GraphNode:
     id: str
     node_type: str            # "root" | "internal" | "leaf"
     label: str                # short LLM-generated label (1-4 words)
-    field_name: Optional[str] = None   # "paradigm"|"formulation"|"mechanism" for internal
+    description: Optional[str] = None  # description shown in tooltip
+    field_name: Optional[str] = None   # "problem_view"|"solution_strategy" for internal
     children: List["GraphNode"] = field(default_factory=list)
 
     # Leaf-only fields
@@ -32,6 +33,7 @@ class GraphNode:
             "id": self.id,
             "node_type": self.node_type,
             "label": self.label,
+            "description": self.description,
             "field_name": self.field_name,
             "children": [c.to_dict() for c in self.children],
             "solution_id": self.solution_id,
@@ -47,6 +49,7 @@ class GraphNode:
             id=d["id"],
             node_type=d["node_type"],
             label=d["label"],
+            description=d.get("description"),
             field_name=d.get("field_name"),
             solution_id=d.get("solution_id"),
             score=d.get("score"),
@@ -91,9 +94,11 @@ def render_for_insert(node: GraphNode, depth: int = 0) -> str:
         line = f"[{node.id}] ROOT"
     elif node.node_type == "leaf":
         score_str = f"{node.score:.4f}" if node.score is not None else "N/A"
-        line = f"{indent}[{node.id}] (leaf) {node.label} | score={score_str}{pb_marker}"
+        desc_snippet = f" | {node.description[:80]}" if node.description else ""
+        line = f"{indent}[{node.id}] (leaf) {node.label} | score={score_str}{pb_marker}{desc_snippet}"
     else:
-        line = f"{indent}[{node.id}] ({node.field_name}) {node.label}"
+        fn_tag = f"({node.field_name}) " if node.field_name else ""
+        line = f"{indent}[{node.id}] {fn_tag}{node.label}"
 
     parts = [line]
     for child in node.children:

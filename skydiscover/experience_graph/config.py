@@ -13,11 +13,11 @@ class ExperienceGraphConfig:
 
     # LLM call settings for LLM_place (classify solution into tree)
     place_temperature: float = 0.3
-    place_max_tokens: int = 1000
+    place_max_tokens: int = 8000   # high to accommodate thinking models (glm-4.7 etc.)
 
     # LLM call settings for LLM_group_leaves (compress mechanism nodes)
     group_temperature: float = 0.3
-    group_max_tokens: int = 800
+    group_max_tokens: int = 4000   # high to accommodate thinking models
 
     # Compression threshold: mechanism nodes with more than this many leaves get
     # compressed via LLM_group_leaves when summarize() is called

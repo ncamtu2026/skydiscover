@@ -398,6 +398,7 @@ class AdaEvolveController(DiscoveryController):
                         rationale=eg_rationale,
                         is_paradigm_breakthrough=bool(paradigm_idea),
                         iteration=iteration,
+                        parent_id=result.parent_id,
                     )
                 except Exception as e:
                     logger.warning(f"ExperienceGraph insert failed: {e}")

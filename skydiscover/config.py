@@ -149,6 +149,12 @@ class LLMModelConfig:
     # Reasoning parameters
     reasoning_effort: Optional[str] = None
 
+    # Thinking mode (for providers like GLM-4.7 that support explicit control)
+    # None = don't send the param; True = enable thinking; False = disable thinking
+    thinking: Optional[bool] = None
+    # Budget level when thinking is enabled: "low", "medium", "high", or a token count string
+    thinking_budget: Optional[str] = None
+
 
 @dataclass
 class LLMConfig(LLMModelConfig):
@@ -234,6 +240,8 @@ class LLMConfig(LLMModelConfig):
             "retries": self.retries,
             "retry_delay": self.retry_delay,
             "reasoning_effort": self.reasoning_effort,
+            "thinking": self.thinking,
+            "thinking_budget": self.thinking_budget,
         }
         self.update_model_params(shared_config)
 

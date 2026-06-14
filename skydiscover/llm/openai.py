@@ -66,6 +66,8 @@ class OpenAILLM(LLMInterface):
         self.api_base = model_cfg.api_base
         self.api_key = model_cfg.api_key
         self.reasoning_effort = getattr(model_cfg, "reasoning_effort", None)
+        self.thinking = getattr(model_cfg, "thinking", None)
+        self.thinking_budget = getattr(model_cfg, "thinking_budget", None)
 
         max_retries = self.retries if self.retries is not None else 0
         is_azure = self.api_base and ".openai.azure.com" in self.api_base.lower()
@@ -163,6 +165,24 @@ class OpenAILLM(LLMInterface):
         response_format = kwargs.get("response_format")
         if response_format is not None:
             params["response_format"] = response_format
+
+        # Build extra_body: start from any caller-supplied dict, then layer in
+        # thinking-mode control so providers like GLM-4.7 don't burn tokens on reasoning.
+        extra_body: Dict[str, Any] = dict(kwargs.get("extra_body") or {})
+        thinking = kwargs.get("thinking", self.thinking)
+        if thinking is not None:
+            if thinking:
+                thinking_body: Dict[str, Any] = {"type": "enabled"}
+                thinking_budget = kwargs.get("thinking_budget", self.thinking_budget)
+                if thinking_budget:
+                    _budget_map = {"low": 4096, "medium": 8000, "high": 16000}
+                    budget_val = _budget_map.get(str(thinking_budget).lower(), thinking_budget)
+                    thinking_body["budget_tokens"] = budget_val
+            else:
+                thinking_body = {"type": "disabled"}
+            extra_body.setdefault("thinking", thinking_body)
+        if extra_body:
+            params["extra_body"] = extra_body
 
         retries, retry_delay, timeout = self._resolve_retry_options(**kwargs)
         attempt = 0

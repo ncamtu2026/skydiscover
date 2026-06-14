@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import statistics
 import time
 import uuid
@@ -33,22 +34,62 @@ from skydiscover.llm.llm_pool import LLMPool
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_json(text: str) -> Dict[str, Any]:
+    """Parse JSON from LLM response, tolerating markdown code fences."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Strip markdown code fence: ```json ... ``` or ``` ... ```
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if m:
+        return json.loads(m.group(1))
+    # Last resort: find first {...} block
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("no JSON object found in LLM response")
+
 # ── System messages ─────────────────────────────────────────────────────────
 
 _PLACE_SYSTEM = """\
-You are maintaining a hierarchical solution tree for an optimization problem.
-The tree has three abstraction levels: paradigm → formulation → mechanism.
-Leaves are individual evaluated solutions.
+You are maintaining a two-level solution tree for an optimization problem.
+The tree has exactly two internal levels before leaves:
+  Level 1 — problem_view:  how does this solution FRAME the problem? \
+What mathematical/structural model does it reduce the problem to? \
+(e.g. "Independent unicast per destination", "Shared multicast tree", "Flow decomposition")
+  Level 2 — solution_strategy: given that problem framing, what is the high-level \
+algorithmic strategy? \
+(e.g. "Greedy shortest path", "Metric closure + MST", "LP relaxation")
+  Leaf: a specific solution under that strategy.
+
 Your task: decide where to place a new solution in the tree.
-Respond with a single JSON object matching the required schema.
-Labels must be SHORT (1-4 words). Reuse existing labels whenever possible.\
+Output ONLY a valid JSON object — no markdown, no explanation, no extra text.
+CRITICAL: The JSON object must start with "action": "<ACTION>" as the very first key.
+Valid actions: ATTACH_TO, NEW_BRANCH_UNDER, SPLIT.
+
+Each internal node needs a short "label" (1-4 words) AND a "description" (2 sentences):
+- problem_view description: what mathematical model is being used, and why it is \
+distinct from other framings in the tree.
+- solution_strategy description: what algorithmic approach is applied to the framed \
+problem, and what its key trade-off or assumption is.
+
+Leaf description (3 sentences, stored as "leaf_description"):
+  1. The specific algorithm or technique applied (name it precisely).
+  2. A key implementation choice or design detail that distinguishes this from \
+a vanilla version of the strategy.
+  3. Any notable constraint handled or trade-off made in the implementation.
+
+Reuse existing labels whenever the same concept applies.\
 """
 
 _GROUP_SYSTEM = """\
 You are grouping solutions that share the same mechanism in a solution tree.
 Group solutions with the same core implementation approach; separate truly different approaches.
 Be neutral — do NOT evaluate quality, potential, or rank solutions.
-Respond with a JSON object.\
+Output ONLY a valid JSON object — no markdown, no explanation, no extra text.\
 """
 
 # ── JSON schemas ─────────────────────────────────────────────────────────────
@@ -73,7 +114,7 @@ _PLACE_SCHEMA = {
                         "properties": {
                             "field_name": {
                                 "type": "string",
-                                "enum": ["paradigm", "formulation", "mechanism"],
+                                "enum": ["problem_view", "solution_strategy"],
                             },
                             "label": {"type": "string"},
                         },
@@ -84,7 +125,7 @@ _PLACE_SCHEMA = {
                 "target_leaf_id": {"type": "string"},
                 "split_field_name": {
                     "type": "string",
-                    "enum": ["paradigm", "formulation", "mechanism", ""],
+                    "enum": ["problem_view", "solution_strategy", ""],
                 },
                 "new_label": {"type": "string"},
                 "leaf_label": {"type": "string"},
@@ -179,6 +220,7 @@ class ExperienceGraph:
         rationale: str,
         is_paradigm_breakthrough: bool = False,
         iteration: int = 0,
+        parent_id: Optional[str] = None,
     ) -> None:
         """Insert a new solution into the tree.
 
@@ -222,6 +264,7 @@ class ExperienceGraph:
             "iteration": iteration,
             "timestamp": datetime.now().isoformat(),
             "solution_id": solution_id,
+            "parent_id": parent_id,
             "score": score,
             "is_paradigm_breakthrough": is_paradigm_breakthrough,
             "action": action,
@@ -247,7 +290,7 @@ class ExperienceGraph:
     async def summarize(self, iteration: int = 0) -> str:
         """Render the tree as compact text.
 
-        Mechanism nodes with more than compress_threshold leaves are compressed
+        solution_strategy nodes with more than compress_threshold leaves are compressed
         via LLM_group_leaves. Returns an empty string if the tree has no leaves.
         """
         if self._total_leaves == 0:
@@ -303,12 +346,13 @@ class ExperienceGraph:
                 "## New Solution\n\n"
                 f"Rationale / changes: {rationale}\n\n"
                 "## Task\n\n"
-                "The tree is empty. Place this solution by creating a new branch under ROOT.\n"
-                "Choose action NEW_BRANCH_UNDER with target_id=ROOT id.\n"
-                "new_path must contain exactly 3 entries: one for paradigm, one for formulation, "
-                "one for mechanism (in that order).\n"
-                "leaf_label: short label (1-4 words) for this solution.\n"
-                "Set target_leaf_id, split_field_name, new_label to empty strings."
+                "The tree is empty. Create the first branch under ROOT using NEW_BRANCH_UNDER.\n"
+                "new_path must contain exactly 2 entries:\n"
+                "  1. {\"field_name\": \"problem_view\", \"label\": \"...\", \"description\": \"2 sentences\"}\n"
+                "  2. {\"field_name\": \"solution_strategy\", \"label\": \"...\", \"description\": \"2 sentences\"}\n"
+                "Also include \"leaf_label\" (1-4 words) and \"leaf_description\" (3 sentences: "
+                "specific algorithm, key implementation detail, notable constraint/trade-off).\n"
+                "Set target_leaf_id, split_field_name, new_label, new_label_description to empty strings."
             )
         else:
             user_content = (
@@ -318,52 +362,91 @@ class ExperienceGraph:
                 f"Rationale / changes: {rationale}\n\n"
                 "## Task\n\n"
                 "Decide where to place this solution. Choose exactly ONE action:\n\n"
-                "- ATTACH_TO (target_id): solution shares the same mechanism as an existing branch.\n"
-                "  target_id = the mechanism internal node. leaf_label: short label for this solution.\n"
-                "  Set new_path=[], target_leaf_id='', split_field_name='', new_label=''.\n\n"
-                "- NEW_BRANCH_UNDER (target_id, new_path): solution diverges at some level.\n"
-                "  target_id = last node that still matches. new_path = list of (field_name, label)\n"
-                "  for levels to CREATE below target_id. If entirely new paradigm: target_id=ROOT id,\n"
-                "  new_path has 3 entries (paradigm, formulation, mechanism).\n"
-                "  Set target_leaf_id='', split_field_name='', new_label=''.\n\n"
-                "- SPLIT (target_leaf_id, split_field_name, new_label): this solution and an existing\n"
-                "  leaf share an abstraction level not yet expressed in the tree.\n"
-                "  Create a new internal node (field_name=split_field_name, label=new_label) wrapping both.\n"
+                "- ATTACH_TO (target_id): same problem_view AND same solution_strategy as an existing branch.\n"
+                "  target_id = the solution_strategy internal node.\n"
+                "  Set new_path=[], target_leaf_id='', split_field_name='', new_label='', new_label_description=''.\n\n"
+                "- NEW_BRANCH_UNDER (target_id, new_path): diverges at some level.\n"
+                "  target_id = last matching node (ROOT if entirely new problem_view).\n"
+                "  new_path = list of {field_name, label, description} for levels to CREATE.\n"
+                "  If new problem_view: new_path has 2 entries (problem_view, solution_strategy).\n"
+                "  If same problem_view but new strategy: target_id = problem_view node, new_path has 1 entry.\n"
+                "  Set target_leaf_id='', split_field_name='', new_label='', new_label_description=''.\n\n"
+                "- SPLIT (target_leaf_id, split_field_name, new_label, new_label_description): \n"
+                "  two leaves reveal a solution_strategy distinction not yet in the tree.\n"
+                "  Creates a new solution_strategy node wrapping both leaves.\n"
+                "  split_field_name must be \"solution_strategy\".\n"
                 "  Set target_id='', new_path=[].\n\n"
+                "For ALL actions include:\n"
+                "  \"leaf_label\" (1-4 words)\n"
+                "  \"leaf_description\" (3 sentences: specific algorithm used | key implementation detail "
+                "that distinguishes this from vanilla version of the strategy | notable constraint or trade-off)\n\n"
                 "RULES:\n"
-                "1. Reuse existing labels. Never create synonymous labels.\n"
-                "2. Labels must be SHORT (1-4 words).\n"
-                "3. Judge similarity by algorithmic idea, NOT surface code similarity."
+                "1. Reuse existing labels whenever the same concept applies. Never create synonymous labels.\n"
+                "2. Labels SHORT (1-4 words). Judge by algorithmic idea, NOT surface code similarity.\n"
+                "3. Two solutions with the same problem_view + strategy but different implementations → ATTACH_TO."
             )
 
+        raw_text = ""
         try:
             result = await self.llm_pool.generate(
                 system_message=_PLACE_SYSTEM,
                 messages=[{"role": "user", "content": user_content}],
                 temperature=self.config.place_temperature,
                 max_tokens=self.config.place_max_tokens,
-                response_format=_PLACE_SCHEMA,
                 reasoning_effort=None,
             )
-            parsed = json.loads(result.text or "{}")
-            if parsed.get("action") in ("ATTACH_TO", "NEW_BRANCH_UNDER", "SPLIT"):
+            raw_text = result.text or ""
+            parsed = _extract_json(raw_text)
+            action = parsed.get("action", "")
+            if isinstance(action, str):
+                parsed["action"] = action.upper()
+
+            # Infer missing action from other fields rather than falling back
+            if parsed["action"] not in ("ATTACH_TO", "NEW_BRANCH_UNDER", "SPLIT"):
+                if parsed.get("new_path"):
+                    parsed["action"] = "NEW_BRANCH_UNDER"
+                    logger.warning(
+                        f"ExperienceGraph: LLM_place missing/unknown action '{action}', "
+                        f"inferred NEW_BRANCH_UNDER from new_path. Raw: {raw_text}"
+                    )
+                elif parsed.get("target_leaf_id"):
+                    parsed["action"] = "SPLIT"
+                    logger.warning(
+                        f"ExperienceGraph: LLM_place missing/unknown action '{action}', "
+                        f"inferred SPLIT from target_leaf_id. Raw: {raw_text}"
+                    )
+                elif parsed.get("target_id") and parsed["target_id"] != self.root.id:
+                    parsed["action"] = "ATTACH_TO"
+                    logger.warning(
+                        f"ExperienceGraph: LLM_place missing/unknown action '{action}', "
+                        f"inferred ATTACH_TO from target_id. Raw: {raw_text}"
+                    )
+
+            if parsed["action"] in ("ATTACH_TO", "NEW_BRANCH_UNDER", "SPLIT"):
                 return parsed
+            logger.warning(
+                f"ExperienceGraph: LLM_place could not infer action. Raw: {raw_text}"
+            )
         except Exception as e:
-            logger.warning(f"ExperienceGraph: LLM_place failed ({e}), using fallback")
+            logger.warning(
+                f"ExperienceGraph: LLM_place failed ({type(e).__name__}: {e}). "
+                f"Raw: {raw_text}"
+            )
 
         logger.warning("ExperienceGraph: LLM_place parse failed, using fallback NEW_BRANCH_UNDER root")
         return {
             "action": "NEW_BRANCH_UNDER",
             "target_id": self.root.id,
             "new_path": [
-                {"field_name": "paradigm", "label": "Unknown"},
-                {"field_name": "formulation", "label": "Unknown"},
-                {"field_name": "mechanism", "label": "Unknown"},
+                {"field_name": "problem_view", "label": "Unknown", "description": ""},
+                {"field_name": "solution_strategy", "label": "Unknown", "description": ""},
             ],
             "target_leaf_id": "",
             "split_field_name": "",
             "new_label": "",
+            "new_label_description": "",
             "leaf_label": "solution",
+            "leaf_description": "",
         }
 
     async def _llm_group_leaves(
@@ -387,23 +470,24 @@ class ExperienceGraph:
             "STRICT: Do NOT evaluate quality, rank, or judge potential. Only group and label."
         )
 
+        raw_text = ""
         try:
             result = await self.llm_pool.generate(
                 system_message=_GROUP_SYSTEM,
                 messages=[{"role": "user", "content": user_content}],
                 temperature=self.config.group_temperature,
                 max_tokens=self.config.group_max_tokens,
-                response_format=_GROUP_SCHEMA,
                 reasoning_effort=None,
             )
-            parsed = json.loads(result.text or "{}")
+            raw_text = result.text or ""
+            parsed = _extract_json(raw_text)
             groups = parsed.get("groups", [])
             if groups and all("label" in g and "leaf_ids" in g for g in groups):
                 return groups
         except Exception as e:
             logger.warning(
                 f"ExperienceGraph: LLM_group_leaves failed for mechanism "
-                f"\"{mechanism_label}\" ({e}), using one-group-per-leaf"
+                f"\"{mechanism_label}\" ({type(e).__name__}: {e}). Raw: {raw_text[:400]}"
             )
 
         logger.warning(
@@ -425,14 +509,16 @@ class ExperienceGraph:
         """Apply LLM_place decision to the tree. Returns the new leaf's id."""
         action = decision.get("action", "NEW_BRANCH_UNDER")
         leaf_label = decision.get("leaf_label") or solution_id[:12]
+        leaf_description = decision.get("leaf_description") or None
 
         leaf = GraphNode(
             id=str(uuid.uuid4()),
             node_type="leaf",
             label=leaf_label,
+            description=leaf_description,
             solution_id=solution_id,
             score=score,
-            rationale_ref=rationale[:200],
+            rationale_ref=rationale[:1500],
             is_paradigm_breakthrough=is_paradigm_breakthrough,
         )
 
@@ -445,7 +531,7 @@ class ExperienceGraph:
                     "falling back to NEW_BRANCH_UNDER root"
                 )
                 target = self.root
-                self._ensure_three_level_path(target, leaf)
+                self._ensure_two_level_path(target, leaf)
             else:
                 target.children.append(leaf)
 
@@ -454,15 +540,25 @@ class ExperienceGraph:
             target = find_node(self.root, target_id) or self.root
             new_path = decision.get("new_path") or []
             if not new_path:
-                self._ensure_three_level_path(target, leaf)
+                self._ensure_two_level_path(target, leaf)
             else:
                 node = target
-                for step in new_path:
+                _levels = ["problem_view", "solution_strategy"]
+                for i, step in enumerate(new_path):
+                    if isinstance(step, dict):
+                        fn = step.get("field_name", _levels[min(i, len(_levels) - 1)])
+                        lbl = step.get("label", "Unknown") or "Unknown"
+                        desc = step.get("description") or None
+                    else:
+                        fn = _levels[min(i, len(_levels) - 1)]
+                        lbl = str(step) if step else "Unknown"
+                        desc = None
                     inter = GraphNode(
                         id=str(uuid.uuid4()),
                         node_type="internal",
-                        field_name=step.get("field_name", "paradigm"),
-                        label=step.get("label", "Unknown"),
+                        field_name=fn,
+                        label=lbl,
+                        description=desc,
                     )
                     node.children.append(inter)
                     node = inter
@@ -477,35 +573,36 @@ class ExperienceGraph:
                     f"ExperienceGraph: SPLIT target leaf '{target_leaf_id}' not found, "
                     "falling back to ATTACH_TO root"
                 )
-                self._ensure_three_level_path(self.root, leaf)
+                self._ensure_two_level_path(self.root, leaf)
             else:
                 parent = find_parent(self.root, target_leaf_id)
                 if parent is None:
                     parent = self.root
-                split_fn = decision.get("split_field_name") or "mechanism"
+                split_fn = decision.get("split_field_name") or "solution_strategy"
                 new_label = decision.get("new_label") or "split"
+                new_label_description = decision.get("new_label_description") or None
                 inter = GraphNode(
                     id=str(uuid.uuid4()),
                     node_type="internal",
                     field_name=split_fn,
                     label=new_label,
+                    description=new_label_description,
                 )
                 parent.children = [c for c in parent.children if c.id != target_leaf_id]
                 inter.children = [old_leaf, leaf]
                 parent.children.append(inter)
                 self._total_internal += 1
         else:
-            self._ensure_three_level_path(self.root, leaf)
+            self._ensure_two_level_path(self.root, leaf)
 
         self._total_leaves += 1
         return leaf.id
 
-    def _ensure_three_level_path(self, parent: GraphNode, leaf: GraphNode) -> None:
-        """Fallback: attach leaf under three Unknown internal nodes."""
+    def _ensure_two_level_path(self, parent: GraphNode, leaf: GraphNode) -> None:
+        """Fallback: attach leaf under two Unknown internal nodes."""
         levels = [
-            ("paradigm", "Unknown"),
-            ("formulation", "Unknown"),
-            ("mechanism", "Unknown"),
+            ("problem_view", "Unknown"),
+            ("solution_strategy", "Unknown"),
         ]
         node = parent
         for fn, lbl in levels:
@@ -544,16 +641,15 @@ class ExperienceGraph:
 
         # Internal node header
         if depth == 0:
-            marker = "▸ "
+            lines.append(f"{indent}▸ [{node.field_name or 'problem_view'}] {node.label}")
         else:
-            marker = f"{node.field_name}: " if node.field_name else ""
-        lines.append(f"{indent}{marker}{node.label}")
+            lines.append(f"{indent}  [{node.field_name or 'solution_strategy'}] {node.label}")
 
         leaf_children = [c for c in node.children if c.node_type == "leaf"]
         non_leaf_children = [c for c in node.children if c.node_type != "leaf"]
 
         if (
-            node.field_name == "mechanism"
+            node.field_name == "solution_strategy"
             and len(leaf_children) > self.config.compress_threshold
         ):
             # Compress via LLM
