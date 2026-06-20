@@ -1,0 +1,33 @@
+# Crossover Synthesis
+
+You are given several high-performing solutions, each developed along a DIFFERENT
+solution direction. Synthesise a SINGLE new program that combines their best ideas.
+There is no designated base solution — treat every source as an equal ingredient and
+decide for yourself how to merge their complementary mechanisms.
+
+# Source Solutions
+{source_solutions}
+
+# Previous Crossover Attempts
+{previous_crossover_attempts}
+
+{idea_guidance}
+# Task
+{task_objective}
+
+Synthesise one new program that draws on the strengths of the sources above.
+- Do NOT simply copy a single source.
+- Do NOT reproduce any of the previous crossover attempts listed above.
+- Combine complementary ideas into something new and mechanistically different.
+
+Provide the complete new program solution.
+
+```{language}
+# Your synthesised program here
+```
+
+**CRITICAL**: Briefly explain which idea you took from which source and why your
+combination is different from the previous crossover attempts above.
+Include a concise docstring describing the combined approach.
+
+{timeout_warning}

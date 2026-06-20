@@ -979,6 +979,7 @@ async function loadCandidates(idx) {
   });
   const programs = await res.json();
   cachedPrograms[cp.path] = programs;
+  window._loadedPrograms = programs;  // make available for parent-child diff lookup
 
   if (selectedIdx === idx) renderProgList(programs);
 }
@@ -990,7 +991,8 @@ function renderProgList(programs) {
   const list = document.getElementById('progList');
   list.innerHTML = '';
 
-  const modeColors = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)' };
+  const modeColors = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)',
+                       exploit: 'var(--accent)', crossover: 'var(--orange)', space_explore: 'var(--purple)' };
 
   programs.forEach((prog, i) => {
     const m = prog.metrics || {};
@@ -1102,7 +1104,8 @@ async function renderInfo(prog) {
   const paradigmAttribution = meta.paradigm_attribution || '';
   const samplingMode = meta.sampling_mode || '';
 
-  const modeColorMap = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)' };
+  const modeColorMap = { exploitation: 'var(--green)', exploration: 'var(--blue)', balanced: 'var(--cyan)',
+                         exploit: 'var(--accent)', crossover: 'var(--orange)', space_explore: 'var(--purple)' };
   const modeBadgeHtml = samplingMode
     ? `<span class="mode-badge" style="background:${modeColorMap[samplingMode] || 'var(--border)'}">${samplingMode}</span>`
     : '<span style="color:var(--dim);font-size:12px">—</span>';
@@ -1172,6 +1175,34 @@ async function renderInfo(prog) {
       </div>`;
   }
 
+  // ── GraphEvolve policy stats (from iteration stats JSONL) ────
+  let graphEvolveHtml = '';
+  if (statRow2 && statRow2.policy) {
+    const sr = statRow2;
+    const pol = sr.policy || {};
+    const fmt = v => (typeof v === 'number' ? v.toFixed(4) : (v ?? '—'));
+    const fmts = v => (typeof v === 'number' ? v.toFixed(3) : (v ?? '—'));
+    const timingRow = sr.iteration_result || {};
+    graphEvolveHtml = `
+      <div class="info-section">
+        <div class="info-section-title">GraphEvolve Policy</div>
+        <div class="info-section-body">
+          <div class="info-row"><span class="info-label">Action</span><span class="info-value"><span class="mode-badge" style="background:${modeColorMap[sr.action] || 'var(--border)'}">${sr.action || '—'}</span></span></div>
+          <div class="info-row"><span class="info-label">Direction</span><span class="info-value" style="color:var(--accent)">${escapeHtml(sr.direction_label || '—')}</span></div>
+          ${sr.space_target ? `<div class="info-row"><span class="info-label">Space target</span><span class="info-value">${escapeHtml(sr.space_target)}</span></div>` : ''}
+          <div class="info-row"><span class="info-label">Parent score</span><span class="info-value">${fmt(sr.parent_score)}</span></div>
+          <div class="info-row"><span class="info-label">Child score</span><span class="info-value">${fmt(sr.child_score)}</span></div>
+          <div class="info-row"><span class="info-label">p_space</span><span class="info-value">${fmts(pol.p_space)}</span></div>
+          <div class="info-row"><span class="info-label">w_exploit</span><span class="info-value">${fmts(pol.w_exploit)}</span></div>
+          <div class="info-row"><span class="info-label">G_global</span><span class="info-value">${fmts(pol.G_global)}</span></div>
+          <div class="info-row"><span class="info-label">best_global</span><span class="info-value">${fmt(pol.best_global)}</span></div>
+          <div class="info-row"><span class="info-label">LLM time</span><span class="info-value">${fmts(timingRow.llm_generation_time_seconds)}s</span></div>
+          <div class="info-row"><span class="info-label">Eval time</span><span class="info-value">${fmts(timingRow.eval_time_seconds)}s</span></div>
+          <div class="info-row"><span class="info-label">Total time</span><span class="info-value">${fmts(timingRow.iteration_time_seconds)}s</span></div>
+        </div>
+      </div>`;
+  }
+
   // ── Evaluator feedback ────────────────────────────────────────
   const artifacts = prog.artifacts || {};
   const feedback = artifacts.feedback || '';
@@ -1186,7 +1217,7 @@ async function renderInfo(prog) {
       </div>`;
   }
 
-  panel.innerHTML = metaHtml + attributionHtml + feedbackHtml +
+  panel.innerHTML = metaHtml + graphEvolveHtml + attributionHtml + feedbackHtml +
     '<div class="info-section" id="knowledgeSection"><div class="info-section-title">Knowledge Retrieved</div><div class="info-section-body" id="knowledgeBody"><span style="color:var(--dim);font-size:12px"><span class="spin"></span> Loading…</span></div></div>';
 
   // ── Knowledge (reuse already-loaded iteration stats) ─────────
@@ -1313,18 +1344,42 @@ async function renderReasoning(prog) {
     blocks.forEach((b, i) => {
       html += `<div class="sr-block" id="srBlock${i}"><div style="color:var(--dim);font-size:11px;margin-bottom:4px">Change ${i+1}</div><div id="srDiff${i}" style="min-height:40px"><span class="spin"></span></div></div>`;
     });
+  } else if (prog.parent_id) {
+    // Full-rewrite mode: no SEARCH/REPLACE blocks, but we can diff parent → child
+    html += `<div class="sr-block-title" style="margin-top:8px">Full-rewrite diff (parent → this)</div>
+             <div id="frDiff" style="min-height:40px"><span class="spin"></span></div>`;
   } else {
-    html += '<div style="color:var(--dim);font-size:12px;margin-top:8px">No SEARCH/REPLACE blocks found in response.</div>';
+    html += '<div style="color:var(--dim);font-size:12px;margin-top:8px">No diff available (initial program).</div>';
   }
 
   panel.innerHTML = html;
 
-  // Async-render each diff block
+  // Async-render SEARCH/REPLACE diffs
   blocks.forEach(async (b, i) => {
     const cont = document.getElementById(`srDiff${i}`);
     if (!cont) return;
     await renderDiff(cont, b.search, b.replace, 'before (SEARCH)', 'after (REPLACE)');
   });
+
+  // Async-render full-rewrite parent→child diff
+  if (!blocks.length && prog.parent_id) {
+    const cont = document.getElementById('frDiff');
+    if (cont) {
+      try {
+        // Look up parent solution from the loaded programs list (same checkpoint)
+        const parentProg = (window._loadedPrograms || []).find(p => p.id === prog.parent_id);
+        const parentCode = parentProg?.solution || '';
+        const childCode = prog.solution || '';
+        if (parentCode && childCode) {
+          await renderDiff(cont, parentCode, childCode, `parent (${prog.parent_id.slice(0,8)})`, `this (${prog.id.slice(0,8)})`);
+        } else {
+          cont.innerHTML = '<div style="color:var(--dim);font-size:12px">Parent solution not available in this checkpoint.</div>';
+        }
+      } catch(e) {
+        cont.innerHTML = `<div style="color:var(--dim);font-size:12px">Diff error: ${escapeHtml(String(e))}</div>`;
+      }
+    }
+  }
 }
 
 function parseSearchReplace(text) {

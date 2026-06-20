@@ -18,5 +18,4 @@ Các tasks đều triển khai program theo cùng một form: viết một class
 	Attention là trái tim của mọi mô hình kiểu GPT: nó quyết định "từ nào nên chú ý tới từ nào". Bài này là một biến thể attention có thêm "cổng" (gate) điều tiết. Viết kernel attention nhanh là một trong những việc khó và giá trị nhất trong HPC AI (Flash-Attention nổi tiếng chính là việc này). Khó nhất nhóm.
 5. `mamba2_scan` - Phép "quét tuần tự" (Mamba)
 	Mamba là một kiến trúc AI mới, thay thế attention. Cốt lõi là phép tính kiểu dây chuyền: kết quả ô thứ t phụ thuộc ô thứ t-1 (y_t = a·y_{t-1} + b·x_t). Khó song song hoá vì bản chất tuần tự (phải biết ô trước mới tính ô sau). Bài này: tìm cách chia khúc để vẫn chạy song song trên GPU được. Khó theo kiểu riêng, không giống nhân ma trận.
-6.  `flash attention` - Tính vector attention cho từng từ
-	Với dữ liệu đầu vào là Q (query - từ này cần tìm gì), K (key - định danh bản thân trong ngữ cảnh câu - danh từ, con vật, chủ ngữ,…), V (value - ý nghĩa thật sự của từ) được sinh ngẫu nhiên, shape cố định, tính `O = softmax(Q·Kᵀ, causal)·V`. Cần tối ưu kernel Triton để tính O này nhanh nhất có thể.
+6. 

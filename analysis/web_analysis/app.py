@@ -226,7 +226,10 @@ def api_iteration_stats():
         if not os.path.isdir(search_dir):
             continue
         for fname in os.listdir(search_dir):
-            if fname.startswith("adaevolve_iteration_stats") and fname.endswith(".jsonl"):
+            if (
+                fname.startswith("adaevolve_iteration_stats")
+                or fname.startswith("graphevolve_iteration_stats")
+            ) and fname.endswith(".jsonl"):
                 fpath = os.path.join(search_dir, fname)
                 try:
                     with open(fpath) as f:

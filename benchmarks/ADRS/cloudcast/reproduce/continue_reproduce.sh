@@ -12,8 +12,15 @@ N_CONTINUE="${N_CONTINUE:-1}"
 
 cd "$(dirname "$0")/.."
 
+# Check if a run_dir already has a live skydiscover-run process.
+is_running() {
+  local run_dir=$1
+  pgrep -f "skydiscover-run.*--output ${run_dir}$" > /dev/null 2>&1 || \
+  pgrep -f "skydiscover-run.*-o ${run_dir}$"       > /dev/null 2>&1
+}
+
 # Resume up to N_CONTINUE most-recent runs for a given case.
-# Starts each as a background job; sleeps 5s between consecutive starts.
+# Skips dirs that already have a live process. Sleeps 5s between starts.
 continue_n_cases() {
   local case=$1 cfg=$2 section=$3
   local count=0
@@ -21,6 +28,12 @@ continue_n_cases() {
     local ckpt
     ckpt=$(ls -d "$run_dir/checkpoints/checkpoint_"* 2>/dev/null | sort -V | tail -1)
     if [[ -n "$ckpt" ]]; then
+      if is_running "$run_dir"; then
+        echo "== cloudcast / $section/$case: ${run_dir##*/} already running, skipping =="
+        count=$((count + 1))
+        [[ "$count" -ge "$N_CONTINUE" ]] && break
+        continue
+      fi
       [[ "$count" -gt 0 ]] && sleep 5
       echo "== cloudcast / $section/$case: resuming ${ckpt##*/} → $run_dir =="
       uv run skydiscover-run initial_program.py evaluator/evaluator.py \
@@ -32,7 +45,7 @@ continue_n_cases() {
       [[ "$count" -ge "$N_CONTINUE" ]] && break
     fi
   done < <(ls -d "outputs/reproduce/${section}/${case}_"* 2>/dev/null | sort -r)
-  [[ "$count" -eq 0 ]] && echo "== cloudcast / $section/$case: no checkpoints found, skipping =="
+  if [[ "$count" -eq 0 ]]; then echo "== cloudcast / $section/$case: no checkpoints found, skipping =="; fi
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,30 @@
+# Explore a New Region of the Solution Space
+
+The search has stagnated along the directions tried so far. Step outside them.
+
+# Explored Map
+{explored_map}
+
+# Reference Solutions
+{exemplars}
+
+# Current Best (jump-off point)
+{seed}
+
+{idea_guidance}
+# Task
+{space_instruction}
+
+{task_objective}
+
+Provide the complete new program solution.
+
+```{language}
+# Your new program here
+```
+
+**CRITICAL**: Your program must genuinely differ from everything in the explored map
+above — do not re-implement an approach that is already listed. Include a concise
+docstring describing the new approach and exactly why it is different.
+
+{timeout_warning}

@@ -46,8 +46,11 @@ class _ConsoleFilter(logging.Filter):
 def setup_search_logging(log_level: str, log_dir: str, name: str) -> None:
     """Configure root logger with a timestamped file handler and a console handler."""
     os.makedirs(log_dir, exist_ok=True)
+    level = getattr(logging, log_level)
     root = logging.getLogger()
-    root.setLevel(getattr(logging, log_level))
+    root.setLevel(level)
+    # cli.py hardcodes skydiscover→INFO; override so the file handler captures DEBUG
+    logging.getLogger("skydiscover").setLevel(level)
 
     log_file = os.path.join(log_dir, f"{name}_{time.strftime('%Y%m%d_%H%M%S')}.log")
     fh = logging.FileHandler(log_file)
@@ -61,6 +64,7 @@ def setup_search_logging(log_level: str, log_dir: str, name: str) -> None:
         ch = logging.StreamHandler()
         ch.setFormatter(_ConsoleFormatter())
         ch.addFilter(_ConsoleFilter())
+        ch.setLevel(logging.INFO)  # keep console clean even when file is at DEBUG
         root.addHandler(ch)
 
     logging.getLogger(__name__).info(f"Logging to {log_file}")

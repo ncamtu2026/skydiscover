@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _SEARCH_CHOICES = [
     "evox",
     "adaevolve",
+    "graphevolve",
     "best_of_n",
     "beam_search",
     "topk",

@@ -530,6 +530,55 @@ class GEPANativeDatabaseConfig(DatabaseConfig):
     random_seed: Optional[int] = 42
 
 
+@dataclass
+class GraphEvolveDatabaseConfig(DatabaseConfig):
+    """GraphEvolve: policy-driven search over an ExperienceGraph (no islands).
+
+    The ExperienceGraph itself is the "population": there is no island /
+    migration / unified-archive machinery.  The flat program store plus the
+    graph structure drive a multi-tier policy (circuit-breaker -> 2-arm bandit
+    -> UCB direction -> power-law parent -> sampled crossover set -> space
+    explore).  Score statistics per direction are derived on-the-fly from the
+    leaves under each ``solution_strategy`` node; only the bandit weights and
+    per-direction pull counts live in the sidecar ``PolicyState``.
+    """
+
+    # Bootstrap: K exploit-from-seed rounds before the full policy turns on.
+    bootstrap_k: int = 5
+
+    # Tier 1 — circuit breaker (global stagnation) + 2-arm action bandit.
+    tau_stag: float = 0.01          # stagnation threshold for space-explore
+    sigmoid_lambda: float = 100.0   # softness of the circuit breaker
+    decay_rho: float = 0.9          # EMA decay for the global stagnation signal
+    initial_g_global: float = 1.0   # start "non-stagnant" so space-explore stays off early
+    bandit_alpha: float = 0.5       # additive reward for a winning arm
+    bandit_beta: float = 0.5        # multiplicative decay for a losing arm
+    w_max: float = 10.0             # clip on the dynamic bandit weight
+
+    # Tier 2a — UCB over directions + power-law parent sampling.
+    ucb_c: float = 1.0              # exploration constant (UCB fallback term)
+    powerlaw_alpha: float = 1.0     # rank exponent for parent / context sampling
+    context_solutions_m: int = 2    # inspiration solutions sampled per exploit
+    previous_attempts_n: int = 5    # compact previous-attempts shown per exploit
+
+    # Tier 2b — crossover set (quality-weighted sample + LLM-verify diversity).
+    crossover_set_size: int = 5
+    crossover_max_attempts: int = 8
+
+    # ExperienceGraph: always on for this backend (the graph is the population).
+    use_experience_graph: bool = True
+    experience_graph_use_paradigm: bool = True
+
+    # Error retry (mirrors AdaEvolve).
+    enable_error_retry: bool = True
+    max_error_retries: int = 2
+
+    # Metric direction — reused by compute_proxy_score (same as AdaEvolve).
+    higher_is_better: Dict[str, bool] = field(default_factory=dict)
+    fitness_key: Optional[str] = None
+    pareto_objectives: List[str] = field(default_factory=list)
+
+
 _DB_CONFIG_BY_TYPE: Dict[str, type] = {
     "evox": EvoxDatabaseConfig,
     "beam_search": BeamSearchDatabaseConfig,
@@ -539,6 +588,7 @@ _DB_CONFIG_BY_TYPE: Dict[str, type] = {
     "openevolve_native": OpenEvolveNativeDatabaseConfig,
     "gepa_native": GEPANativeDatabaseConfig,
     "claude_code": ClaudeCodeConfig,
+    "graphevolve": GraphEvolveDatabaseConfig,
 }
 
 

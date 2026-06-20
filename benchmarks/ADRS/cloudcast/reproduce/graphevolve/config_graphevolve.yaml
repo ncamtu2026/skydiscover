@@ -1,0 +1,78 @@
+# CloudCast — GraphEvolve: policy-driven search over the ExperienceGraph (no islands)
+language: python
+diff_based_generation: false      # GraphEvolve generates full rewrites
+max_iterations: 100
+checkpoint_interval: 1
+max_solution_length: 60000
+
+llm:
+  api_base: https://api.int2.net/v1
+  models:
+    - name: "glm-4.7"
+      weight: 1.0
+  max_tokens: 32000
+  timeout: 800
+  retries: 2
+  retry_delay: 0
+  thinking: true
+  reasoning_effort: "medium"
+  guide_models:                   # used for crossover diversity verification
+    - name: "glm-4.7"
+      weight: 1.0
+      thinking: false             # diversity check is fast comparison, no thinking needed
+  experience_graph_models:        # used by ExperienceGraph placement/grouping
+    - name: "glm-4.7"
+      weight: 1.0
+      thinking: false             # tree placement is structured JSON, no thinking needed
+
+prompt:
+  system_message: |-
+    You are an expert in cloud infrastructure optimization. Your task is to evolve the
+    search_algorithm(src, dsts, G, num_partitions) function to minimize overall
+    data transfer cost across multiple clouds.
+    Focus on efficiently broadcasting input data to multiple destination nodes by leveraging
+    parallel paths and overlapping transfers across networks. Use the BroadCastTopology
+    class and make_nx_graph function to identify low-cost routes.
+    Prioritize strategies that reduce redundant transfers, balance load across networks,
+    and exploit multi-network topologies to minimize cost.
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: true
+  summary_api_base: https://api.int2.net/v1
+  summary_model: "glm-4.7"
+
+log_level: "DEBUG"
+
+search:
+  type: graphevolve
+  database:
+    # Bootstrap: space-explore rounds to seed graph with diverse directions
+    bootstrap_k: 5
+    # Tier 1 — circuit breaker + 2-arm action bandit
+    tau_stag: 0.01
+    sigmoid_lambda: 100.0
+    decay_rho: 0.9
+    initial_g_global: 0.03           # decays to threshold ~0.01 after ~10 non-improving iters
+    bandit_alpha: 0.5
+    bandit_beta: 0.5
+    w_max: 10.0
+    # Tier 2a — UCB direction + power-law parent / context
+    ucb_c: 1.0
+    powerlaw_alpha: 1.0
+    context_solutions_m: 2
+    previous_attempts_n: 5
+    # Tier 2b — crossover set
+    crossover_set_size: 5
+    crossover_max_attempts: 8
+    # Error retry
+    enable_error_retry: true
+    max_error_retries: 2
+    # Optional features
+    use_idea_stage: false      # two-stage: ideate (LLM call) then code (LLM call) — adds ~1 LLM call/iter
+    diversity_mode: "llm"      # crossover diversity: "llm" (LLM-verify) or "embedding" (code similarity score)
+    exploit_sampling: "local"  # "local" (UCB direction → power-law within) or "global" (power-law all programs)
+    analyze_graph: false       # append LLM diagnosis of explored map to space_explore context
+    force_attach_existing: false  # exploit/crossover outputs get placement_hint="attach" → LLM prefers ATTACH_TO/SPLIT over NEW_BRANCH

@@ -202,6 +202,49 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+// ── Policy mode (GraphEvolve & any algo that logs policy_action) ───────────────
+function modeKey(e) {
+  if (!e.policy_action) return 'seed';
+  if (e.policy_action === 'space_explore') return 'explore_' + (e.space_target || 'new_dir');
+  return e.policy_action;  // 'exploit' | 'crossover'
+}
+const MODE_ORDER = ['exploit', 'crossover', 'explore_new_form', 'explore_new_dir', 'seed'];
+function modeStyles() {
+  return {
+    exploit:          { color: cssVar('--accent'),  symbol: 'circle',           name: 'Exploit' },
+    crossover:        { color: cssVar('--orange'),  symbol: 'diamond',          name: 'Crossover' },
+    explore_new_form: { color: cssVar('--purple'),  symbol: 'star-triangle-up', name: 'Explore · new formulation' },
+    explore_new_dir:  { color: cssVar('--cyan'),    symbol: 'triangle-up',      name: 'Explore · new direction' },
+    seed:             { color: cssVar('--text-dim'),symbol: 'circle-open',      name: 'Seed' },
+  };
+}
+const MODE_LABEL = {
+  exploit: 'Exploit', crossover: 'Crossover',
+  explore_new_form: 'Explore (new formulation)',
+  explore_new_dir: 'Explore (new direction)', seed: 'Seed',
+};
+// Build per-mode marker traces from insert events (empty when no policy logged).
+function buildModeTraces(insertEvts, txtMap) {
+  const styles = modeStyles();
+  const groups = {};
+  insertEvts.forEach(e => { const k = modeKey(e); (groups[k] = groups[k] || []).push(e); });
+  const traces = [];
+  MODE_ORDER.forEach(k => {
+    const g = groups[k];
+    if (!g || !g.length) return;
+    const st = styles[k];
+    traces.push({
+      x: g.map(e => e.iteration), y: g.map(e => e.score),
+      mode: 'markers', name: st.name,
+      marker: { color: st.color, size: 7, symbol: st.symbol, opacity: 0.9,
+                line: { color: cssVar('--bg2'), width: 0.5 } },
+      text: g.map(e => txtMap[e.solution_id] || ''),
+      customdata: g.map(e => e.solution_id || null), hoverinfo: 'text',
+    });
+  });
+  return traces;
+}
+
 // ── Lineage arrow toggle ───────────────────────────────────────────────────────
 let _treeEvts = [];
 let parentArrowsVisible = true;
@@ -566,14 +609,21 @@ function renderTimeline() {{
       _solEventMap[e.solution_id] = {{ iter: e.iteration, score: e.score }};
     }}
   }});
+  // Adaptive: when the search algorithm records a per-iteration policy mode
+  // (e.g. GraphEvolve), colour the timeline by mode instead of a single series.
+  const hasPolicy = insertEvts.some(e => e.policy_action);
+  const txtMap = {{}};
   insertEvts.forEach(e => {{
+    const mk = modeKey(e);
     const txt = [
       `<b>${{e.leaf_label || ''}}</b>`,
-      `Action: ${{e.action || ''}}`,
+      hasPolicy ? `Mode: ${{MODE_LABEL[mk] || mk}}` : `Action: ${{e.action || ''}}`,
+      hasPolicy ? `Placement: ${{e.action || ''}}` : null,
       `Path: ${{(e.placement_path || []).join(' → ')}}`,
       `ID: ${{(e.solution_id || '').slice(0, 8)}}`,
       `Score: ${{e.score != null ? e.score.toFixed(4) : 'N/A'}}`,
-    ].join('<br>');
+    ].filter(x => x != null).join('<br>');
+    txtMap[e.solution_id] = txt;
     allX.push(e.iteration); allY.push(e.score); allText.push(txt);
     allSolIds.push(e.solution_id || null);
     if (e.is_paradigm_breakthrough) {{
@@ -604,18 +654,24 @@ function renderTimeline() {{
     x: e.iteration, y: 1, xref: 'x', yref: 'paper',
     text: '⚡', showarrow: false, font: {{ size: 12 }}, yanchor: 'bottom',
   }}));
-  Plotly.react('timeline-chart', [
-    {{ x: allX, y: allY, mode: 'lines+markers', name: 'Score',
+  const baseTraces = [];
+  if (hasPolicy) {{
+    baseTraces.push({{ x: allX, y: allY, mode: 'lines', name: 'Score path',
+       line: {{ color: cssVar('--border'), width: 1 }}, hoverinfo: 'skip', showlegend: false }});
+    buildModeTraces(insertEvts, txtMap).forEach(t => baseTraces.push(t));
+  }} else {{
+    baseTraces.push({{ x: allX, y: allY, mode: 'lines+markers', name: 'Score',
        line: {{ color: cssVar('--accent'), width: 1.5 }},
        marker: {{ color: cssVar('--accent'), size: 4, opacity: 0.8 }},
-       text: allText, customdata: allSolIds, hoverinfo: 'text' }},
-    {{ x: pbX, y: pbY, mode: 'markers', name: '★ Paradigm BT',
+       text: allText, customdata: allSolIds, hoverinfo: 'text' }});
+  }}
+  baseTraces.push({{ x: pbX, y: pbY, mode: 'markers', name: '★ Paradigm BT',
        marker: {{ color: cssVar('--leaf-pb'), size: 10, symbol: 'star', opacity: 0.95 }},
-       text: pbText, customdata: pbSolIds, hoverinfo: 'text' }},
-    {{ x: [], y: [], name: '●sel', mode: 'markers',
+       text: pbText, customdata: pbSolIds, hoverinfo: 'text' }});
+  baseTraces.push({{ x: [], y: [], name: '●sel', mode: 'markers',
        marker: {{ color: 'transparent', size: 18, line: {{ color: cssVar('--orange'), width: 2.5 }} }},
-       hoverinfo: 'skip', showlegend: false }},
-  ], {{
+       hoverinfo: 'skip', showlegend: false }});
+  Plotly.react('timeline-chart', baseTraces, {{
     paper_bgcolor: bg, plot_bgcolor: bg,
     font: {{ color: textColor, size: 11 }},
     xaxis: {{ title: 'Iteration', gridcolor: gridColor, zeroline: false }},
@@ -1044,8 +1100,13 @@ function renderTimeline() {{
         _solEventMap[e.solution_id] = {{ iter: e.iteration, score: e.score }};
       }}
     }});
+    const hasPolicy = inserts.some(e => e.policy_action);
+    const txtMap = {{}};
     inserts.forEach(e => {{
-      const txt = `<b>${{run.label}}</b><br>${{e.leaf_label||''}}<br>Score: ${{e.score!=null?e.score.toFixed(4):'N/A'}}<br>Action: ${{e.action||''}}<br>Path: ${{(e.placement_path||[]).join(' → ')}}`;
+      const mk = modeKey(e);
+      const modeLine = hasPolicy ? `<br>Mode: ${{MODE_LABEL[mk] || mk}}` : '';
+      const txt = `<b>${{run.label}}</b><br>${{e.leaf_label||''}}<br>Score: ${{e.score!=null?e.score.toFixed(4):'N/A'}}${{modeLine}}<br>Placement: ${{e.action||''}}<br>Path: ${{(e.placement_path||[]).join(' → ')}}`;
+      txtMap[e.solution_id] = txt;
       ax.push(e.iteration); ay.push(e.score); at.push(txt); asd.push(e.solution_id||null);
       if (e.is_paradigm_breakthrough) {{ px.push(e.iteration); py.push(e.score); pt.push(txt); psd.push(e.solution_id||null); }}
     }});
@@ -1056,9 +1117,17 @@ function renderTimeline() {{
         showarrow:true, arrowhead:2, arrowsize:1, arrowwidth:1.2,
         arrowcolor:color, opacity:0.4, text:'' }});
     }});
-    traces.push({{ x:ax, y:ay, mode:'lines+markers', name:run.label,
-      line:{{ color, width:1.5 }}, marker:{{ color, size:4, opacity:0.75 }},
-      text:at, customdata:asd, hoverinfo:'text', legendgroup:run.label, showlegend:true }});
+    if (hasPolicy && RUNS.length === 1) {{
+      // Single GraphEvolve run: colour markers by policy mode.
+      traces.push({{ x:ax, y:ay, mode:'lines', name:run.label,
+        line:{{ color: cssVar('--border'), width:1 }}, hoverinfo:'skip',
+        legendgroup:run.label, showlegend:false }});
+      buildModeTraces(inserts, txtMap).forEach(t => {{ t.legendgroup = run.label; traces.push(t); }});
+    }} else {{
+      traces.push({{ x:ax, y:ay, mode:'lines+markers', name:run.label,
+        line:{{ color, width:1.5 }}, marker:{{ color, size:4, opacity:0.75 }},
+        text:at, customdata:asd, hoverinfo:'text', legendgroup:run.label, showlegend:true }});
+    }}
     traces.push({{ x:px, y:py, mode:'markers', name:`${{run.label}} ★`,
       marker:{{ color, size:10, symbol:'star', opacity:0.95 }}, text:pt, customdata:psd, hoverinfo:'text',
       legendgroup:run.label, showlegend:false }});

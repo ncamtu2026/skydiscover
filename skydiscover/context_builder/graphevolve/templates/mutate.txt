@@ -1,0 +1,34 @@
+# Current Solution Information
+- Main Metrics:
+{metrics}
+- Focus areas: {improvement_areas}
+
+# Program Generation History
+## Previous Attempts In This Direction
+
+{previous_attempts}
+
+{other_context_programs}
+
+# Current Solution
+{current_program}
+
+{search_guidance}
+
+# Task
+{task_objective}
+
+Provide the complete new program solution.
+
+IMPORTANT: Make sure your rewritten program maintains the same inputs and outputs
+as the original program, but with an improved internal implementation. Refine the
+approach of THIS solution direction rather than switching to an unrelated strategy.
+
+```{language}
+# Your rewritten program here
+```
+
+**CRITICAL**: Be thoughtful about your changes and explain your reasoning thoroughly.
+Include a concise docstring at the start of functions describing the exact approach taken.
+
+{timeout_warning}

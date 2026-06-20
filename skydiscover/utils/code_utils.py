@@ -8,6 +8,29 @@ from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 
+_EVOLVE_BLOCK_RE = re.compile(
+    r"#\s*EVOLVE-BLOCK-START\s*\n(.*?)\n\s*#\s*EVOLVE-BLOCK-END",
+    re.DOTALL,
+)
+
+
+def extract_evolve_block(solution: str) -> str:
+    """Return only the mutable code between EVOLVE-BLOCK markers.
+
+    Solutions are wrapped in ``# EVOLVE-BLOCK-START`` / ``# EVOLVE-BLOCK-END``
+    markers (see :func:`skydiscover.utils.prepare`).  When markers are present
+    this returns the concatenated content of every block; otherwise the whole
+    solution is returned unchanged.  Used to feed the LLM only the part that
+    actually differs between solutions (e.g. for crossover diversity checks).
+    """
+    if not solution:
+        return ""
+    blocks = _EVOLVE_BLOCK_RE.findall(solution)
+    if not blocks:
+        return solution
+    return "\n\n".join(b.strip("\n") for b in blocks)
+
+
 def apply_diff(original_solution: str, diff_text: str) -> str:
     """
     Apply a diff to the original code

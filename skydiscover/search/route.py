@@ -24,6 +24,8 @@ from skydiscover.search.evox.controller import CoEvolutionController
 from skydiscover.search.evox.database.search_strategy_db import SearchStrategyDatabase
 from skydiscover.search.gepa_native.controller import GEPANativeController
 from skydiscover.search.gepa_native.database import GEPANativeDatabase
+from skydiscover.search.graphevolve.controller import GraphEvolveController
+from skydiscover.search.graphevolve.database import GraphEvolveDatabase
 from skydiscover.search.openevolve_native.database import OpenEvolveNativeDatabase
 from skydiscover.search.registry import (
     _CONTROLLER_REGISTRY,
@@ -75,3 +77,7 @@ register_controller("gepa_native", GEPANativeController)
 # Claude Code: single-agent baseline running Claude CLI in a container
 register_database("claude_code", ClaudeCodeDatabase)
 register_controller("claude_code", ClaudeCodeController)
+
+# GraphEvolve: policy-driven search over an ExperienceGraph (no islands)
+register_database("graphevolve", GraphEvolveDatabase)
+register_controller("graphevolve", GraphEvolveController)
