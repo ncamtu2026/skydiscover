@@ -15,7 +15,8 @@ llm:
   retries: 2
   retry_delay: 0
   thinking: true
-  reasoning_effort: "medium"
+  reasoning_effort: "low"
+  stream: true
   guide_models:                   # used for crossover diversity verification
     - name: "glm-4.7"
       weight: 1.0
@@ -52,6 +53,7 @@ search:
     # Bootstrap: space-explore rounds to seed graph with diverse directions
     bootstrap_k: 5
     # Tier 1 — circuit breaker + 2-arm action bandit
+    bootstrap_thinking: false
     tau_stag: 0.01
     sigmoid_lambda: 100.0
     decay_rho: 0.9

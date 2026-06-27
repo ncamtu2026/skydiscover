@@ -1,6 +1,7 @@
 # Explore a New Region of the Solution Space
 
-The search has stagnated along the directions tried so far. Step outside them.
+Create a new problem framing or algorithmic strategy. Build on validated principles
+(metrics) but apply them in a genuinely different way.
 
 # Explored Map
 {explored_map}
@@ -11,7 +12,7 @@ The search has stagnated along the directions tried so far. Step outside them.
 # Current Best (jump-off point)
 {seed}
 
-{idea_guidance}
+{error_section}{idea_guidance}
 # Task
 {space_instruction}
 

@@ -8,6 +8,7 @@ is in English; only the project docs are in Vietnamese.
 
 from __future__ import annotations
 
+import copy
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -16,6 +17,7 @@ from skydiscover.config import Config
 from skydiscover.context_builder.default import DefaultContextBuilder
 from skydiscover.context_builder.utils import TemplateManager, prog_attr
 from skydiscover.search.base_database import Program
+from skydiscover.utils.code_utils import extract_evolve_block
 from skydiscover.utils.metrics import compute_proxy_score
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,56 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
     # ------------------------------------------------------------------
     def _db_config(self) -> Any:
         return getattr(self.config.search, "database", None)
+
+    @property
+    def _evolve_block_only(self) -> bool:
+        return bool(getattr(self._db_config(), "evolve_block_only", True))
+
+    @property
+    def _exploit_diff_based(self) -> bool:
+        return bool(getattr(self._db_config(), "exploit_diff_based", True))
+
+    def _prompt_solution(self, solution: Optional[str]) -> str:
+        """The code shown to the LLM: only the EVOLVE block when enabled."""
+        solution = solution or ""
+        if not self._evolve_block_only:
+            return solution
+        return extract_evolve_block(solution)
+
+    def _reduce_one(self, program: Optional[Program]) -> Optional[Program]:
+        """Return a shallow copy whose .solution is reduced to the EVOLVE block."""
+        if program is None or not self._evolve_block_only:
+            return program
+        full = prog_attr(program, "solution", "") or ""
+        block = extract_evolve_block(full)
+        if not block or block == full:
+            return program
+        clone = copy.copy(program)
+        try:
+            clone.solution = block
+        except Exception:  # pragma: no cover - non-dataclass program
+            return program
+        return clone
+
+    def _reduce(
+        self, current_program: Union[Program, Dict[str, Program], None]
+    ) -> Union[Program, Dict[str, Program], None]:
+        if isinstance(current_program, dict):
+            return {k: self._reduce_one(v) for k, v in current_program.items()}
+        return self._reduce_one(current_program)
+
+    # Reduce solutions to their EVOLVE block before the default renderer formats them.
+    def _format_current_program(
+        self, current_program: Union[Program, Dict[str, Program]], language: str
+    ) -> str:
+        return super()._format_current_program(self._reduce(current_program), language)
+
+    def _format_single_context_program(
+        self, program: Program, index: int, language: str, lines: list
+    ) -> None:
+        super()._format_single_context_program(
+            self._reduce_one(program), index, language, lines
+        )
 
     def _proxy(self, metrics: Dict[str, Any]) -> float:
         db = self._db_config()
@@ -98,6 +150,15 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
         ]
         return "\n".join(lines)
 
+    def _error_section(self, error_context: Optional[str]) -> str:
+        if not error_context:
+            return ""
+        return (
+            "## Previous Attempt Failed\n"
+            f"The previous generation failed with:\n{error_context}\n"
+            "Fix this issue directly rather than guessing.\n\n"
+        )
+
     def _direction_guidance(
         self, direction_info: Optional[Dict[str, str]], error_context: Optional[str]
     ) -> str:
@@ -126,7 +187,7 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
             label = src.get("label", "")
             desc = src.get("description", "")
             score = src.get("score")
-            solution = prog_attr(program, "solution", "")
+            solution = self._prompt_solution(prog_attr(program, "solution", ""))
             score_str = f" (score: {score:.4f})" if isinstance(score, (int, float)) else ""
             lines.append(f"## Source {i}: {label}{score_str}")
             if desc:
@@ -169,7 +230,10 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
             if context_programs
             else ""
         )
-        user = self.template_manager.get_template("mutate").format(
+        # EXPLOIT refines a single parent: use SEARCH/REPLACE diffs when enabled
+        # (the fixed wrapper is preserved automatically), otherwise full rewrite.
+        template_key = "mutate_diff" if self._exploit_diff_based else "mutate"
+        user = self.template_manager.get_template(template_key).format(
             metrics=self._format_metrics(metrics),
             improvement_areas=self._identify_improvement_areas(
                 prog_attr(parent, "solution", ""), metrics, []
@@ -227,12 +291,14 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
         sources: List[Dict[str, Any]],
         previous_attempts: Optional[List[Program]] = None,
         idea: Optional[Dict[str, Any]] = None,
+        error_context: Optional[str] = None,
     ) -> Dict[str, str]:
         language = self._language
         prev_text = self._format_previous_crossovers(previous_attempts or [], language)
         user = self.template_manager.get_template("crossover").format(
             source_solutions=self._format_sources(sources, language),
             previous_crossover_attempts=prev_text,
+            error_section=self._error_section(error_context),
             idea_guidance=self._format_idea_guidance(idea, "crossover"),
             task_objective=self._task_objective(),
             language=language,
@@ -246,7 +312,7 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
         lines = [f"{len(attempts)} prior crossover(s) already tried (do not repeat them):"]
         for i, prog in enumerate(attempts, 1):
             score = self._proxy(prog_attr(prog, "metrics", {}) or {})
-            sol = prog_attr(prog, "solution", "") or ""
+            sol = self._prompt_solution(prog_attr(prog, "solution", "") or "")
             # Show just a short snippet so the prompt doesn't bloat
             snippet = sol[:300].rstrip()
             if len(sol) > 300:
@@ -263,6 +329,7 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
         seed: Optional[Program] = None,
         best_pv_info: Optional[Dict[str, str]] = None,
         idea: Optional[Dict[str, Any]] = None,
+        error_context: Optional[str] = None,
     ) -> Dict[str, str]:
         language = self._language
         exemplar_text = (
@@ -277,6 +344,7 @@ class GraphEvolveContextBuilder(DefaultContextBuilder):
             explored_map=explored_map or "(empty)",
             exemplars=exemplar_text,
             seed=seed_text,
+            error_section=self._error_section(error_context),
             idea_guidance=self._format_idea_guidance(idea, "space_explore"),
             space_instruction=self._space_instruction(target, best_pv_info),
             task_objective=self._task_objective(),

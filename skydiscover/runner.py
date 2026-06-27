@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Optional
 
-from skydiscover.config import Config, build_output_dir, load_config
+from skydiscover.config import Config, build_output_dir, load_config, snapshot_config_file
 from skydiscover.search.base_database import Program
 from skydiscover.search.default_discovery_controller import (
     DiscoveryController,
@@ -52,6 +52,8 @@ class Runner:
             self.name, initial_program_path or "scratch"
         )
         os.makedirs(self.output_dir, exist_ok=True)
+        # Save a copy of the config used for this run alongside the results.
+        snapshot_config_file(config_path, self.output_dir)
         self._setup_logging()
 
         # Load the initial program (can be optional)

@@ -1,6 +1,8 @@
-# LLM SQL — GraphEvolve: policy-driven search over the ExperienceGraph (no islands)
+# LLM SQL — AdaGraph: AdaEvolve's adaptive machinery with the ExperienceGraph as the
+# population (problem_view nodes are the islands). Mirrors config_no_ke (adaevolve:
+# diff-based exploit, same LLM/eval) so the substrate is the only difference.
 language: python
-diff_based_generation: false      # GraphEvolve generates full rewrites
+diff_based_generation: true       # AdaGraph mutates via SEARCH/REPLACE diffs (like AdaEvolve)
 max_iterations: 100
 checkpoint_interval: 1
 max_solution_length: 60000
@@ -14,16 +16,16 @@ llm:
   timeout: 800
   retries: 2
   retry_delay: 0
-  thinking: true
-  reasoning_effort: "low"
-  guide_models:                   # used for crossover diversity verification
+  thinking: false
+  # reasoning_effort: "medium"
+  guide_models:                   # used for paradigm ideation + PV dedup judging
     - name: "glm-4.7"
       weight: 1.0
       thinking: false
-  experience_graph_models:        # used by ExperienceGraph placement/grouping
+  experience_graph_models:        # used by ExperienceGraph seed placement / grouping
     - name: "glm-4.7"
       weight: 1.0
-      thinking: false
+      thinking: false             # tree placement is structured JSON, no thinking needed
 
 prompt:
   system_message: |-
@@ -96,37 +98,30 @@ monitor:
 log_level: "DEBUG"
 
 search:
-  type: graphevolve
+  type: adagraph
   database:
-    # Bootstrap: space-explore rounds to seed graph with diverse directions
-    bootstrap_k: 5
-    # Reasoning mode for the bootstrap generation call (overrides the model's own
-    # setting for the first bootstrap_k rounds). null = inherit the model default.
-    bootstrap_thinking: false
-    # bootstrap_thinking_budget: low      # only used when bootstrap_thinking: true
-    # bootstrap_reasoning_effort: low     # for OpenAI-style reasoning models
-    # Tier 1 — circuit breaker + 2-arm action bandit
-    tau_stag: 0.01
-    sigmoid_lambda: 100.0
-    decay_rho: 0.9
-    initial_g_global: 0.03
-    bandit_alpha: 0.5
-    bandit_beta: 0.5
-    w_max: 10.0
-    # Tier 2a — UCB direction + power-law parent / context
-    ucb_c: 1.0
-    powerlaw_alpha: 1.0
-    context_solutions_m: 2
-    previous_attempts_n: 5
-    # Tier 2b — crossover set
-    crossover_set_size: 5
-    crossover_max_attempts: 8
-    # Error retry
-    enable_error_retry: true
-    max_error_retries: 2
-    # Optional features
-    use_idea_stage: false
-    diversity_mode: "llm"
-    exploit_sampling: "local"
-    analyze_graph: false
-    force_attach_existing: false
+    # Per-PV archive (live population) — same sizes as AdaEvolve islands
+    population_size: 20
+    use_unified_archive: true
+    # PV (problem_view) lifecycle: bootstrap n_init PVs, cap at max_islands,
+    # paradigm opens new framings (P_form) / directions; weakest PV dropped to swap.
+    num_islands: 2                # n_init PVs to bootstrap
+    max_islands: 5               # cap on active PVs
+    use_dynamic_islands: true
+    pv_grace_period: 5
+    # P_form (prob a paradigm event opens a new framing) — sigmoid on fleet health
+    pform_tau: 0.3
+    pform_lambda: 8.0
+    pv_dead_ratio: 0.1
+    pv_dedup_accept_prob: 0.1
+    insight_top_k: 5
+    # Adaptive search + UCB PV selection
+    use_adaptive_search: true
+    use_ucb_selection: true
+    # Generative tech-transfer migration (star-from-best)
+    use_migration: true
+    migration_interval: 15
+    migration_count: 5
+    # Paradigm breakthrough (unchanged AdaEvolve mechanism; eats the graph summary)
+    use_paradigm_breakthrough: true
+    use_knowledge_evolve: false   # OFF — isolate the search algorithm

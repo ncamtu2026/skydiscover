@@ -10,6 +10,8 @@ import logging
 
 from skydiscover.search.adaevolve.controller import AdaEvolveController
 from skydiscover.search.adaevolve.database import AdaEvolveDatabase
+from skydiscover.search.adagraph.controller import AdaGraphController
+from skydiscover.search.adagraph.database import AdaGraphDatabase
 from skydiscover.search.beam_search.database import BeamSearchDatabase
 
 # Algorithm implementations
@@ -81,3 +83,8 @@ register_controller("claude_code", ClaudeCodeController)
 # GraphEvolve: policy-driven search over an ExperienceGraph (no islands)
 register_database("graphevolve", GraphEvolveDatabase)
 register_controller("graphevolve", GraphEvolveController)
+
+# AdaGraph: AdaEvolve's adaptive machinery with the ExperienceGraph as the
+# population (problem_view nodes are the islands)
+register_database("adagraph", AdaGraphDatabase)
+register_controller("adagraph", AdaGraphController)

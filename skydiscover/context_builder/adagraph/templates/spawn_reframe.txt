@@ -1,0 +1,24 @@
+# Open a New Solution Framing
+
+The search has explored the framings listed below and is no longer improving.
+Propose a GENUINELY NEW way to frame this problem — a new problem_view — that is
+NOT present in the map. You may SIMPLIFY aggressively: a clean, different core
+mechanism is far better than piling more features onto the current best.
+
+# Explored Map (framings already tried — do NOT re-implement any of these)
+{explored_map}
+
+# Current Best (jump-off point ONLY — do not merely refine it)
+{seed}
+
+# Task
+{task_objective}
+Provide a COMPLETE new program built on a fundamentally different framing.
+
+```{language}
+# Your new program here
+```
+
+**CRITICAL**: Your program must differ in its CORE algorithmic mechanism from
+everything in the explored map above. Include a concise docstring that names the
+new framing and states explicitly why it is different.

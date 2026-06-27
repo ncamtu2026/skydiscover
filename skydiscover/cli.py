@@ -24,6 +24,7 @@ _SEARCH_CHOICES = [
     "evox",
     "adaevolve",
     "graphevolve",
+    "adagraph",
     "best_of_n",
     "beam_search",
     "topk",
@@ -191,12 +192,13 @@ async def main_async() -> int:
                     )
                     return 1
 
-                from skydiscover.config import build_output_dir
+                from skydiscover.config import build_output_dir, snapshot_config_file
 
                 output_dir = args.output or build_output_dir(
                     search_type, args.initial_program or "scratch"
                 )
                 os.makedirs(output_dir, exist_ok=True)
+                snapshot_config_file(args.config, output_dir)
 
                 from skydiscover.extras.monitor import start_monitor, stop_monitor
 
@@ -240,7 +242,9 @@ async def main_async() -> int:
             initial_program_path=args.initial_program,
             evaluation_file=args.evaluation_file,
             config=config,
-            config_path=args.config if config is None else None,
+            # config wins for loading when present; the path is still passed so the
+            # runner can snapshot the original YAML into the output dir.
+            config_path=args.config,
             output_dir=args.output,
             evaluator_env_vars=evaluator_env_vars,
         )

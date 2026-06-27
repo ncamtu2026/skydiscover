@@ -155,6 +155,10 @@ class LLMModelConfig:
     # Budget level when thinking is enabled: "low", "medium", "high", or a token count string
     thinking_budget: Optional[str] = None
 
+    # Stream the response token-by-token (prints chunks live to stdout).
+    # None = inherit from the top-level LLMConfig default.
+    stream: Optional[bool] = None
+
 
 @dataclass
 class LLMConfig(LLMModelConfig):
@@ -173,6 +177,11 @@ class LLMConfig(LLMModelConfig):
     timeout: int = 600
     retries: int = 3
     retry_delay: int = 5
+
+    # Stream responses token-by-token (prints chunks live to stdout).
+    # None = unset (backends decide their own default; GraphEvolve defaults ON).
+    # True/False here is an explicit, propagated override.
+    stream: Optional[bool] = None
 
     # model(s) for solution discovery
     models: List[LLMModelConfig] = field(default_factory=list)
@@ -242,6 +251,7 @@ class LLMConfig(LLMModelConfig):
             "reasoning_effort": self.reasoning_effort,
             "thinking": self.thinking,
             "thinking_budget": self.thinking_budget,
+            "stream": self.stream,
         }
         self.update_model_params(shared_config)
 
@@ -546,6 +556,14 @@ class GraphEvolveDatabaseConfig(DatabaseConfig):
     # Bootstrap: K exploit-from-seed rounds before the full policy turns on.
     bootstrap_k: int = 5
 
+    # Bootstrap reasoning mode — applied only to the generation LLM call during
+    # the first ``bootstrap_k`` completed rounds, so seeding can run in a
+    # different reasoning mode than the rest of the search (e.g. thinking off for
+    # cheaper / faster bootstrap).  ``None`` = inherit each model's own setting.
+    bootstrap_thinking: Optional[bool] = None
+    bootstrap_thinking_budget: Optional[str] = None
+    bootstrap_reasoning_effort: Optional[str] = None
+
     # Tier 1 — circuit breaker (global stagnation) + 2-arm action bandit.
     tau_stag: float = 0.01          # stagnation threshold for space-explore
     sigmoid_lambda: float = 100.0   # softness of the circuit breaker
@@ -565,6 +583,22 @@ class GraphEvolveDatabaseConfig(DatabaseConfig):
     crossover_set_size: int = 5
     crossover_max_attempts: int = 8
 
+    # Code generation scope.
+    # evolve_block_only: feed the LLM only the mutable EVOLVE-BLOCK of each
+    #   solution and merge the generated block back into the fixed wrapper
+    #   (program.solution stays a full, runnable file).  Default on.
+    # exploit_diff_based: EXPLOIT mutates the parent via SEARCH/REPLACE diffs
+    #   (wrapper preserved automatically); crossover / space-explore always
+    #   full-rewrite.  Default on.
+    evolve_block_only: bool = True
+    exploit_diff_based: bool = True
+
+    # Stream every LLM call token-by-token to stdout (generation, EG placement,
+    # idea/verify) so progress — including the reasoning phase — is visible live.
+    # Default on for GraphEvolve; honoured unless a model sets ``stream``
+    # explicitly.  Set false to silence streaming for all benchmarks at once.
+    stream_output: bool = True
+
     # ExperienceGraph: always on for this backend (the graph is the population).
     use_experience_graph: bool = True
     experience_graph_use_paradigm: bool = True
@@ -579,6 +613,58 @@ class GraphEvolveDatabaseConfig(DatabaseConfig):
     pareto_objectives: List[str] = field(default_factory=list)
 
 
+@dataclass
+class AdaGraphDatabaseConfig(AdaEvolveDatabaseConfig):
+    """AdaGraph: AdaEvolve adaptive search where the ExperienceGraph IS the population.
+
+    Identical machinery to AdaEvolve (per-dimension G/intensity, UCB selection,
+    UnifiedArchive eviction, paradigm breakthrough), but the "islands" are the
+    ``problem_view`` nodes of the ExperienceGraph instead of a fixed list:
+      - each problem_view (PV) owns a UnifiedArchive + an AdaptiveState/UCB arm,
+      - new PVs are created by *generative spawn* (a cheap reframe LLM call) on
+        stagnation rather than by copying top programs into a fresh container,
+      - migration is *generative tech-transfer* (parent = a PV native, the global
+        best enters only as context),
+      - LLM_place assigns every solution to a PV; the graph also keeps the full
+        knowledge memory used for paradigm summaries and visualization.
+    """
+
+    # The ExperienceGraph is the substrate — always on for this backend.
+    use_experience_graph: bool = True
+    experience_graph_use_paradigm: bool = True
+
+    # PV (island) lifecycle. ``num_islands`` = initial PV count to bootstrap,
+    # ``max_islands`` = cap on number of PVs. ``use_dynamic_islands`` gates the
+    # generative spawn that opens new framings on stagnation.
+    num_islands: int = 2            # n_init PVs (bootstrap target)
+    max_islands: int = 5            # cap on PVs
+    use_dynamic_islands: bool = True
+
+    # Grace period: a newly created PV is force-selected for this many iterations
+    # before UCB can starve it — protects a newborn framing (e.g. a fresh Steiner)
+    # long enough to mature. Mirrors AdaEvolve's paradigm_max_uses intent.
+    pv_grace_period: int = 5
+
+    # --- v2: PV lifecycle as a quality-diversity archive of framings ----------
+    # When paradigm fires (global stall), P_form is the probability that ONE idea
+    # opens a NEW problem_view (vs. all ideas deepening existing PVs as new
+    # solution_strategies).  P_form = sigmoid(lambda * (tau - s)), where s is the
+    # global-normalised, decayed health (R_k/V_k) of the most-droppable PV slot
+    # relative to the best PV (free slot => s=0 => high P_form).  Healthier fleet
+    # => lower P_form.
+    pform_tau: float = 0.3
+    pform_lambda: float = 8.0
+    # A live PV counts as "dead" (droppable) when its R_k/V_k < pv_dead_ratio *
+    # best R_k/V_k (and it is past grace and does not hold the global best).
+    pv_dead_ratio: float = 0.1
+    # A newly proposed framing judged similar to a previously-tried PV is accepted
+    # only with this probability (else it is redirected as a direction).
+    pv_dedup_accept_prob: float = 0.1
+    # Distillation: keep the top-K globally-normalised "what changed" edits per
+    # solution_strategy / problem_view, injected into paradigm prompts.
+    insight_top_k: int = 5
+
+
 _DB_CONFIG_BY_TYPE: Dict[str, type] = {
     "evox": EvoxDatabaseConfig,
     "beam_search": BeamSearchDatabaseConfig,
@@ -589,6 +675,7 @@ _DB_CONFIG_BY_TYPE: Dict[str, type] = {
     "gepa_native": GEPANativeDatabaseConfig,
     "claude_code": ClaudeCodeConfig,
     "graphevolve": GraphEvolveDatabaseConfig,
+    "adagraph": AdaGraphDatabaseConfig,
 }
 
 
@@ -979,6 +1066,23 @@ def bridge_provider_env(config: Config) -> None:
         os.environ.setdefault("OPENAI_API_BASE", model.api_base)
 
 
+def snapshot_config_file(source_path: Optional[Union[str, Path]], output_dir: Union[str, Path]) -> None:
+    """Copy the run's config YAML into *output_dir* so each result records its config.
+
+    Copies the original file verbatim (preserving comments/formatting). No-op when
+    *source_path* is missing — e.g. a pure CLI-override run with no config file.
+    """
+    if not source_path or not os.path.exists(source_path):
+        return
+    import shutil
+
+    dest = os.path.join(str(output_dir), "config.yaml")
+    try:
+        shutil.copyfile(source_path, dest)
+    except OSError:
+        logger.warning("Could not snapshot config %s -> %s", source_path, dest, exc_info=True)
+
+
 def build_output_dir(search_type: str, initial_program_path: str, base_dir: str = "outputs") -> str:
     """Build a standardized output directory: outputs/<search_type>/<problem_name>_<MMDD_HHMM>/"""
     from datetime import datetime
@@ -1066,9 +1170,19 @@ def apply_overrides(
             },
             overwrite=True,
         )
-        # Fill api_base/api_key only where a model doesn't already have them
+        # Fill api_base/api_key only where a model doesn't already have them.
+        # thinking / thinking_budget / stream are propagated with overwrite=False
+        # so the freshly-rebuilt main/guide/evaluator models inherit the
+        # top-level defaults, while pools that set them explicitly (e.g.
+        # experience_graph_models with thinking=False) are left untouched.
         config.llm.update_model_params(
-            {"api_base": config.llm.api_base, "api_key": config.llm.api_key},
+            {
+                "api_base": config.llm.api_base,
+                "api_key": config.llm.api_key,
+                "thinking": config.llm.thinking,
+                "thinking_budget": config.llm.thinking_budget,
+                "stream": config.llm.stream,
+            },
             overwrite=False,
         )
 

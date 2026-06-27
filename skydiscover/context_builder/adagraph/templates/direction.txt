@@ -1,0 +1,28 @@
+# Open a New Solution Direction (within the SAME framing)
+
+Stay inside the problem framing below, but invent a NEW solution strategy whose
+CORE algorithmic mechanism is genuinely different from every existing direction
+listed. The goal is to vet this framing's space broadly, not to refine an existing
+direction.
+
+# Problem Framing (problem_view — keep this framing)
+{pv_label}: {pv_description}
+
+# Existing Directions in this framing (your new one MUST differ in mechanism)
+{existing_directions}
+
+# Reference solution under this framing (jump-off point)
+{seed}
+
+# Task
+{task_objective}
+Provide a COMPLETE program that keeps the framing above but uses a NEW core
+mechanism distinct from all existing directions.
+
+```{language}
+# Your new program here
+```
+
+**CRITICAL**: Keep the SAME problem framing, but the solution strategy must be
+mechanistically distinct from every direction listed above. Include a concise
+docstring naming the strategy and how it differs from the existing ones.

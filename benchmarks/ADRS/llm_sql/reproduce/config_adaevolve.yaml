@@ -1,6 +1,8 @@
-# LLM SQL — GraphEvolve: policy-driven search over the ExperienceGraph (no islands)
+# LLM SQL — AdaEvolve: adaptive multi-island evolution (baseline to compare vs GraphEvolve).
+# Mirrors reproduce/config_graphevolve.yaml (same LLM/prompt/eval/monitor) so the search
+# algorithm is the only difference. Knowledge-evolve is OFF here to isolate it.
 language: python
-diff_based_generation: false      # GraphEvolve generates full rewrites
+diff_based_generation: true       # AdaEvolve mutates via SEARCH/REPLACE diffs
 max_iterations: 100
 checkpoint_interval: 1
 max_solution_length: 60000
@@ -14,13 +16,10 @@ llm:
   timeout: 800
   retries: 2
   retry_delay: 0
-  thinking: true
-  reasoning_effort: "low"
-  guide_models:                   # used for crossover diversity verification
-    - name: "glm-4.7"
-      weight: 1.0
-      thinking: false
-  experience_graph_models:        # used by ExperienceGraph placement/grouping
+  thinking: false
+  # reasoning_effort: "low"
+  stream: true
+  guide_models:                   # used for paradigm / idea generation
     - name: "glm-4.7"
       weight: 1.0
       thinking: false
@@ -96,37 +95,13 @@ monitor:
 log_level: "DEBUG"
 
 search:
-  type: graphevolve
+  type: adaevolve
   database:
-    # Bootstrap: space-explore rounds to seed graph with diverse directions
-    bootstrap_k: 5
-    # Reasoning mode for the bootstrap generation call (overrides the model's own
-    # setting for the first bootstrap_k rounds). null = inherit the model default.
-    bootstrap_thinking: false
-    # bootstrap_thinking_budget: low      # only used when bootstrap_thinking: true
-    # bootstrap_reasoning_effort: low     # for OpenAI-style reasoning models
-    # Tier 1 — circuit breaker + 2-arm action bandit
-    tau_stag: 0.01
-    sigmoid_lambda: 100.0
-    decay_rho: 0.9
-    initial_g_global: 0.03
-    bandit_alpha: 0.5
-    bandit_beta: 0.5
-    w_max: 10.0
-    # Tier 2a — UCB direction + power-law parent / context
-    ucb_c: 1.0
-    powerlaw_alpha: 1.0
-    context_solutions_m: 2
-    previous_attempts_n: 5
-    # Tier 2b — crossover set
-    crossover_set_size: 5
-    crossover_max_attempts: 8
-    # Error retry
-    enable_error_retry: true
-    max_error_retries: 2
-    # Optional features
-    use_idea_stage: false
-    diversity_mode: "llm"
-    exploit_sampling: "local"
-    analyze_graph: false
-    force_attach_existing: false
+    population_size: 20
+    num_islands: 2
+    use_adaptive_search: true
+    use_ucb_selection: true
+    use_migration: true
+    use_unified_archive: true
+    use_paradigm_breakthrough: true
+    use_knowledge_evolve: false   # OFF — isolate the search algorithm for the comparison

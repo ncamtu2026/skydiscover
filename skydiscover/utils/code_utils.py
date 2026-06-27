@@ -31,6 +31,30 @@ def extract_evolve_block(solution: str) -> str:
     return "\n\n".join(b.strip("\n") for b in blocks)
 
 
+def merge_evolve_block(template_solution: str, new_block: str) -> str:
+    """Substitute the EVOLVE-BLOCK content of ``template_solution`` with ``new_block``.
+
+    ``template_solution`` is a full program that carries the fixed (non-evolved)
+    wrapper plus EVOLVE-BLOCK markers; the wrapper is taken from it verbatim.
+    ``new_block`` is the freshly generated mutable code — if the model echoed the
+    markers back, they are stripped first so we never nest them.  When the
+    template has no markers (the whole file is mutable) the new block replaces it
+    wholesale.  Only the first marker pair is substituted, matching the
+    single-block convention used by the benchmarks.
+    """
+    inner = new_block or ""
+    if _EVOLVE_BLOCK_RE.search(inner):
+        inner = extract_evolve_block(inner)
+    if not template_solution or not _EVOLVE_BLOCK_RE.search(template_solution):
+        return inner
+    inner = inner.strip("\n")
+    return _EVOLVE_BLOCK_RE.sub(
+        lambda _m: f"# EVOLVE-BLOCK-START\n{inner}\n# EVOLVE-BLOCK-END",
+        template_solution,
+        count=1,
+    )
+
+
 def apply_diff(original_solution: str, diff_text: str) -> str:
     """
     Apply a diff to the original code

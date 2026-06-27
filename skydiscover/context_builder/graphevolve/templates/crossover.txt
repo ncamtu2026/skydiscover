@@ -11,7 +11,7 @@ decide for yourself how to merge their complementary mechanisms.
 # Previous Crossover Attempts
 {previous_crossover_attempts}
 
-{idea_guidance}
+{error_section}{idea_guidance}
 # Task
 {task_objective}
 

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 import os
+import sys
 import tempfile
 import time
 import uuid as _uuid
@@ -68,6 +69,7 @@ class OpenAILLM(LLMInterface):
         self.reasoning_effort = getattr(model_cfg, "reasoning_effort", None)
         self.thinking = getattr(model_cfg, "thinking", None)
         self.thinking_budget = getattr(model_cfg, "thinking_budget", None)
+        self.stream = bool(getattr(model_cfg, "stream", None) or False)
 
         max_retries = self.retries if self.retries is not None else 0
         is_azure = self.api_base and ".openai.azure.com" in self.api_base.lower()
@@ -168,6 +170,15 @@ class OpenAILLM(LLMInterface):
 
         # Build extra_body: start from any caller-supplied dict, then layer in
         # thinking-mode control so providers like GLM-4.7 don't burn tokens on reasoning.
+        #
+        # Two different switches are needed because the same model is reachable
+        # through different stacks:
+        #   • Zhipu / Anthropic-style cloud APIs read ``thinking: {"type": ...}``.
+        #   • Self-hosted GLM/Qwen3 on vLLM or SGLang read the chat-template kwarg
+        #     ``chat_template_kwargs: {"enable_thinking": bool}`` — the ``thinking``
+        #     block is silently ignored there (which is why ``thinking: false`` had
+        #     no effect against the local vLLM server).
+        # We send both; each backend uses the one it understands and ignores the rest.
         extra_body: Dict[str, Any] = dict(kwargs.get("extra_body") or {})
         thinking = kwargs.get("thinking", self.thinking)
         if thinking is not None:
@@ -181,8 +192,15 @@ class OpenAILLM(LLMInterface):
             else:
                 thinking_body = {"type": "disabled"}
             extra_body.setdefault("thinking", thinking_body)
+            ctk = dict(extra_body.get("chat_template_kwargs") or {})
+            ctk.setdefault("enable_thinking", bool(thinking))
+            extra_body["chat_template_kwargs"] = ctk
         if extra_body:
             params["extra_body"] = extra_body
+
+        if kwargs.get("stream", self.stream):
+            params["stream"] = True
+            params["stream_options"] = {"include_usage": True}
 
         retries, retry_delay, timeout = self._resolve_retry_options(**kwargs)
         attempt = 0
@@ -249,6 +267,8 @@ class OpenAILLM(LLMInterface):
         return None
 
     async def _call_api(self, params: Dict[str, Any]) -> str:
+        if params.get("stream"):
+            return await self._call_api_streaming(params)
         loop = asyncio.get_running_loop()
         try:
             t0 = time.perf_counter()
@@ -278,6 +298,76 @@ class OpenAILLM(LLMInterface):
                 raise
             logger.info("Chat Completions unsupported; falling back to Responses API")
             return await self._call_api_via_responses(params)
+
+    async def _call_api_streaming(self, params: Dict[str, Any]) -> str:
+        """Stream the completion, printing chunks live, and return the full text.
+
+        The blocking SDK stream is drained in a worker thread; each delta is
+        echoed to stdout so generation progress is visible in real time.
+        """
+        loop = asyncio.get_running_loop()
+        model = params.get("model", self.model)
+
+        def _reasoning_of(delta) -> Optional[str]:
+            # Thinking providers (GLM-4.7, DeepSeek-R1, ...) stream the chain of
+            # thought in a non-standard field.  The OpenAI SDK parks unknown
+            # fields in ``model_extra`` rather than as plain attributes, so check
+            # both before giving up — otherwise the reasoning phase looks frozen.
+            for attr in ("reasoning_content", "reasoning"):
+                val = getattr(delta, attr, None)
+                if isinstance(val, str) and val:
+                    return val
+            extra = getattr(delta, "model_extra", None) or {}
+            for key, val in extra.items():
+                if "reasoning" in key and isinstance(val, str) and val:
+                    return val
+            return None
+
+        def _drain() -> tuple:
+            parts: List[str] = []
+            usage = None
+            in_reasoning = False
+            t0 = time.perf_counter()
+            sys.stdout.write(f"\n--- streaming [{model}] ---\n")
+            sys.stdout.flush()
+            for chunk in self.client.chat.completions.create(**params):
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage
+                choices = getattr(chunk, "choices", None)
+                if not choices:
+                    continue
+                delta = choices[0].delta
+                reasoning = _reasoning_of(delta)
+                if reasoning:
+                    if not in_reasoning:
+                        sys.stdout.write("\n<reasoning>\n")
+                        in_reasoning = True
+                    sys.stdout.write(reasoning)
+                    sys.stdout.flush()
+                piece = getattr(delta, "content", None)
+                if piece:
+                    if in_reasoning:
+                        sys.stdout.write("\n</reasoning>\n")
+                        in_reasoning = False
+                    parts.append(piece)
+                    sys.stdout.write(piece)
+                    sys.stdout.flush()
+            if in_reasoning:
+                sys.stdout.write("\n</reasoning>\n")
+            sys.stdout.write("\n--- end stream ---\n")
+            sys.stdout.flush()
+            return "".join(parts), usage, time.perf_counter() - t0
+
+        content, usage, elapsed = await loop.run_in_executor(None, _drain)
+        if usage:
+            out_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", 0) or 0
+            tok_per_s = out_tokens / elapsed if elapsed > 0 else 0
+            logger.info(
+                f"LLM speed (stream): {elapsed:.2f}s | {out_tokens} out / {total_tokens} total tokens"
+                f" | {tok_per_s:.1f} tok/s | model={model}"
+            )
+        return content
 
     async def _call_api_via_responses(self, params: Dict[str, Any]) -> str:
         """Translate a Chat-Completions-style *params* dict into a Responses API

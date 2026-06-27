@@ -1,0 +1,75 @@
+# CloudCast — AdaGraph: AdaEvolve's adaptive machinery with the ExperienceGraph as
+# the population (problem_view nodes are the islands). Mirrors reproduce/adaevolve
+# (same LLM/eval/monitor, diff-based exploit) so the substrate is the only difference.
+language: python
+diff_based_generation: true       # AdaGraph mutates via SEARCH/REPLACE diffs (like AdaEvolve)
+max_iterations: 100
+checkpoint_interval: 1
+max_solution_length: 60000
+
+llm:
+  api_base: https://api.int2.net/v1
+  models:
+    - name: "glm-4.7"
+      weight: 1.0
+  max_tokens: 32000
+  timeout: 800
+  retries: 2
+  retry_delay: 0
+  thinking: false
+  # reasoning_effort: "medium"
+  stream: true
+  guide_models:                   # used for paradigm / idea generation
+    - name: "glm-4.7"
+      weight: 1.0
+      thinking: false
+  experience_graph_models:        # used by ExperienceGraph placement/grouping (LLM_place)
+    - name: "glm-4.7"
+      weight: 1.0
+      thinking: false             # tree placement is structured JSON, no thinking needed
+
+prompt:
+  system_message: |-
+    You are an expert in cloud infrastructure optimization. Your task is to evolve the
+    search_algorithm(src, dsts, G, num_partitions) function to minimize overall
+    data transfer cost across multiple clouds.
+    Focus on efficiently broadcasting input data to multiple destination nodes by leveraging
+    parallel paths and overlapping transfers across networks. Use the BroadCastTopology
+    class and make_nx_graph function to identify low-cost routes.
+    Prioritize strategies that reduce redundant transfers, balance load across networks,
+    and exploit multi-network topologies to minimize cost.
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: true
+  summary_api_base: https://api.int2.net/v1
+  summary_model: "glm-4.7"
+
+log_level: "DEBUG"
+
+search:
+  type: adagraph
+  database:
+    # Per-PV archive (live population) — same sizes as AdaEvolve islands
+    population_size: 20
+    use_unified_archive: true
+    # PV (island) lifecycle: bootstrap n_init PVs, cap at max_islands PVs,
+    # generative spawn opens a new framing on stagnation.
+    num_islands: 2                # n_init PVs to bootstrap
+    max_islands: 5               # cap on number of PVs
+    use_dynamic_islands: true    # enable generative spawn
+    pv_grace_period: 5           # protect a newborn PV for N iterations before UCB can starve it
+    spawn_productivity_threshold: 0.015
+    spawn_cooldown_iterations: 30
+    # Adaptive search + UCB PV selection
+    use_adaptive_search: true
+    use_ucb_selection: true
+    # Generative tech-transfer migration (star-from-best)
+    use_migration: true
+    migration_interval: 15
+    migration_count: 5
+    # Paradigm breakthrough (unchanged AdaEvolve mechanism; eats the graph summary)
+    use_paradigm_breakthrough: true
+    use_knowledge_evolve: false  # OFF — isolate the search algorithm for the comparison

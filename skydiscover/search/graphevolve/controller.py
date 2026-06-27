@@ -32,7 +32,13 @@ from skydiscover.search.graphevolve.policy import (
     SPACE_EXPLORE,
     GraphEvolvePolicy,
 )
-from skydiscover.utils.code_utils import extract_evolve_block, parse_full_rewrite
+from skydiscover.utils.code_utils import (
+    apply_diff,
+    extract_diffs,
+    extract_evolve_block,
+    merge_evolve_block,
+    parse_full_rewrite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +50,22 @@ _VERIFY_SYSTEM = (
 
 class GraphEvolveController(DiscoveryController):
     def __init__(self, controller_input: DiscoveryControllerInput):
+        # Default streaming ON for all GraphEvolve LLM pools (generation, guide,
+        # ExperienceGraph) so progress is visible live for every benchmark
+        # without per-config edits.  Must run before super().__init__ builds the
+        # pools.  Only fills models that left ``stream`` unset (None); an explicit
+        # True/False in the config is preserved.
+        llm_cfg = controller_input.config.llm
+        if bool(getattr(controller_input.config.search.database, "stream_output", True)):
+            for pool in (
+                llm_cfg.models,
+                llm_cfg.guide_models,
+                llm_cfg.experience_graph_models,
+            ):
+                for m in pool:
+                    if getattr(m, "stream", None) is None:
+                        m.stream = True
+
         super().__init__(controller_input)
 
         db_config = self.config.search.database
@@ -52,6 +74,10 @@ class GraphEvolveController(DiscoveryController):
 
         # Hyperparameters
         self.bootstrap_k = int(getattr(db_config, "bootstrap_k", 5))
+        # Reasoning-mode overrides applied to the generation call during bootstrap.
+        self.bootstrap_thinking = getattr(db_config, "bootstrap_thinking", None)
+        self.bootstrap_thinking_budget = getattr(db_config, "bootstrap_thinking_budget", None)
+        self.bootstrap_reasoning_effort = getattr(db_config, "bootstrap_reasoning_effort", None)
         self.crossover_set_size = int(getattr(db_config, "crossover_set_size", 5))
         self.crossover_max_attempts = int(getattr(db_config, "crossover_max_attempts", 8))
         self.context_solutions_m = int(getattr(db_config, "context_solutions_m", 2))
@@ -83,6 +109,10 @@ class GraphEvolveController(DiscoveryController):
         self.analyze_graph = bool(getattr(db_config, "analyze_graph", False))
         self.force_attach_existing = bool(getattr(db_config, "force_attach_existing", True))
 
+        # Code-generation scope (see GraphEvolveDatabaseConfig).
+        self.evolve_block_only = bool(getattr(db_config, "evolve_block_only", True))
+        self.exploit_diff_based = bool(getattr(db_config, "exploit_diff_based", True))
+
         self._completed = 0  # successful generations (for bootstrap gating)
         self._iteration_stats_log_path: Optional[str] = None
 
@@ -93,6 +123,19 @@ class GraphEvolveController(DiscoveryController):
 
     def _init_context_builder(self) -> None:
         self.context_builder = GraphEvolveContextBuilder(self.config)
+
+    async def _call_llm(self, system_message: str, user_message: str, **kwargs):
+        """Echo every prompt to stdout before dispatching (debug visibility)."""
+        import sys
+
+        sys.stdout.write(
+            "\n========== LLM PROMPT ==========\n"
+            f"[SYSTEM]\n{system_message or '(none)'}\n"
+            f"[USER]\n{user_message or '(none)'}\n"
+            "========== END PROMPT ==========\n"
+        )
+        sys.stdout.flush()
+        return await super()._call_llm(system_message, user_message, **kwargs)
 
     # ====================================================================
     # Iteration stats logging (mirrors AdaEvolve's adaevolve_iteration_stats)
@@ -279,7 +322,8 @@ class GraphEvolveController(DiscoveryController):
                 if self.use_idea_stage:
                     idea = await self._generate_idea_crossover(sources, prior_crossovers)
                 prompt = self.context_builder.build_crossover_prompt(
-                    sources, previous_attempts=prior_crossovers, idea=idea
+                    sources, previous_attempts=prior_crossovers, idea=idea,
+                    error_context=error_context,
                 )
                 return {
                     "action": CROSSOVER,
@@ -323,6 +367,7 @@ class GraphEvolveController(DiscoveryController):
                 seed=seed,
                 best_pv_info=best_pv_info,
                 idea=idea,
+                error_context=error_context,
             )
             return {
                 "action": SPACE_EXPLORE,
@@ -493,6 +538,62 @@ class GraphEvolveController(DiscoveryController):
     # ====================================================================
     # Generation + evaluation
     # ====================================================================
+    def _wrapper_template(self, parent: Optional["Program"]) -> str:
+        """A full, marker-bearing solution to merge a generated EVOLVE block into.
+
+        The non-evolved wrapper is invariant across a benchmark, so the parent's
+        solution (or, lacking one, the current best) supplies it verbatim.
+        """
+        if parent is not None and getattr(parent, "solution", None):
+            return parent.solution
+        best = self.database.get_best_program()
+        return best.solution if best is not None and best.solution else ""
+
+    def _build_child_solution(
+        self, response: str, action: str, parent: Optional["Program"]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Turn a raw LLM response into a full, runnable child solution.
+
+        EXPLOIT with ``exploit_diff_based`` applies SEARCH/REPLACE diffs onto the
+        parent (wrapper preserved automatically).  Otherwise the model produced a
+        rewrite of the EVOLVE block (or whole file), merged back into the wrapper
+        when ``evolve_block_only`` is on.
+        """
+        if self.exploit_diff_based and action == EXPLOIT and parent and parent.solution:
+            diffs = extract_diffs(response)
+            if diffs:
+                child = apply_diff(parent.solution, response)
+                if child == parent.solution:
+                    return None, "Diff blocks did not match parent solution"
+                return child, None
+            # Model ignored the diff format — fall back to full-rewrite parsing.
+
+        block = parse_full_rewrite(response, self.config.language)
+        if not block:
+            return None, "No valid solution in response"
+        if self.evolve_block_only:
+            return merge_evolve_block(self._wrapper_template(parent), block), None
+        return block, None
+
+    def _bootstrap_llm_kwargs(self) -> Dict[str, Any]:
+        """Per-call LLM reasoning overrides while bootstrapping.
+
+        During the first ``bootstrap_k`` completed rounds, apply the configured
+        reasoning mode (e.g. ``bootstrap_thinking: false``) to the generation
+        call.  Returns ``{}`` once bootstrap is over so models fall back to their
+        own settings.  Only non-None overrides are sent.
+        """
+        if self._completed >= self.bootstrap_k:
+            return {}
+        kwargs: Dict[str, Any] = {}
+        if self.bootstrap_thinking is not None:
+            kwargs["thinking"] = self.bootstrap_thinking
+        if self.bootstrap_thinking_budget is not None:
+            kwargs["thinking_budget"] = self.bootstrap_thinking_budget
+        if self.bootstrap_reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.bootstrap_reasoning_effort
+        return kwargs
+
     async def _generate_and_eval(
         self, prompt: Dict[str, str], iteration: int, plan: Dict[str, Any]
     ) -> Tuple[Optional["Program"], Optional[str], Dict[str, Any]]:
@@ -502,7 +603,9 @@ class GraphEvolveController(DiscoveryController):
 
         llm_start = time.time()
         try:
-            result = await self._call_llm(prompt["system"], prompt["user"])
+            result = await self._call_llm(
+                prompt["system"], prompt["user"], **self._bootstrap_llm_kwargs()
+            )
             response = result.text
         except Exception as e:
             return None, f"LLM error: {e}", gen_extra
@@ -512,9 +615,14 @@ class GraphEvolveController(DiscoveryController):
         if not response:
             return None, "Empty LLM response", gen_extra
 
-        child_solution = parse_full_rewrite(response, self.config.language)
+        parent_id = plan.get("parent_id")
+        parent = self.database.programs.get(parent_id) if parent_id else None
+
+        child_solution, parse_error = self._build_child_solution(
+            response, plan["action"], parent
+        )
         if not child_solution:
-            return None, "No valid solution in response", gen_extra
+            return None, parse_error or "No valid solution in response", gen_extra
 
         eval_start = time.time()
         try:
@@ -532,9 +640,6 @@ class GraphEvolveController(DiscoveryController):
                 or "Evaluation failed"
             )
             return None, f"Eval failure: {err}", gen_extra
-
-        parent_id = plan.get("parent_id")
-        parent = self.database.programs.get(parent_id) if parent_id else None
 
         # Build a descriptive changes string for web_analysis / timeline
         action = plan["action"]

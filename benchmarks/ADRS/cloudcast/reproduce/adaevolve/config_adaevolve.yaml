@@ -1,0 +1,58 @@
+# CloudCast — AdaEvolve: adaptive multi-island evolution (baseline to compare vs GraphEvolve)
+# Mirrors reproduce/graphevolve/config_graphevolve.yaml (same LLM/eval/monitor) so the
+# search algorithm is the only difference. Knowledge-evolve is OFF here to isolate it.
+language: python
+diff_based_generation: true       # AdaEvolve mutates via SEARCH/REPLACE diffs
+max_iterations: 100
+checkpoint_interval: 1
+max_solution_length: 60000
+
+llm:
+  api_base: https://api.int2.net/v1
+  models:
+    - name: "glm-4.7"
+      weight: 1.0
+  max_tokens: 32000
+  timeout: 800
+  retries: 2
+  retry_delay: 0
+  thinking: false
+  # reasoning_effort: "medium"
+  stream: true
+  guide_models:                   # used for paradigm / idea generation
+    - name: "glm-4.7"
+      weight: 1.0
+      thinking: false
+
+prompt:
+  system_message: |-
+    You are an expert in cloud infrastructure optimization. Your task is to evolve the
+    search_algorithm(src, dsts, G, num_partitions) function to minimize overall
+    data transfer cost across multiple clouds.
+    Focus on efficiently broadcasting input data to multiple destination nodes by leveraging
+    parallel paths and overlapping transfers across networks. Use the BroadCastTopology
+    class and make_nx_graph function to identify low-cost routes.
+    Prioritize strategies that reduce redundant transfers, balance load across networks,
+    and exploit multi-network topologies to minimize cost.
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: true
+  summary_api_base: https://api.int2.net/v1
+  summary_model: "glm-4.7"
+
+log_level: "DEBUG"
+
+search:
+  type: adaevolve
+  database:
+    population_size: 20
+    num_islands: 2
+    use_adaptive_search: true
+    use_ucb_selection: true
+    use_migration: true
+    use_unified_archive: true
+    use_paradigm_breakthrough: true
+    use_knowledge_evolve: false   # OFF — isolate the search algorithm for the comparison

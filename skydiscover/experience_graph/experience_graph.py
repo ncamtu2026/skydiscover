@@ -304,6 +304,237 @@ class ExperienceGraph:
             trigger = "first" if is_first else "interval"
             self._save_snapshot(iteration=iteration, trigger=trigger)
 
+    def _solution_strategy_of(self, solution_id: str) -> Optional[GraphNode]:
+        """The solution_strategy internal node above the leaf with ``solution_id``."""
+
+        def dfs(node: GraphNode, ss: Optional[GraphNode]) -> Optional[GraphNode]:
+            if node.node_type == "leaf" and node.solution_id == solution_id:
+                return ss
+            for child in node.children:
+                nss = (
+                    child
+                    if child.node_type == "internal" and child.field_name == "solution_strategy"
+                    else ss
+                )
+                found = dfs(child, nss)
+                if found is not None:
+                    return found
+            return None
+
+        return dfs(self.root, None)
+
+    async def attach_under_parent(
+        self,
+        parent_solution_id: str,
+        solution_id: str,
+        score: float,
+        rationale: str,
+        leaf_label: str = "solution",
+        iteration: int = 0,
+        parent_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Deterministically attach a new leaf under ``parent_solution_id``'s
+        solution_strategy node — no LLM_place call.
+
+        Used by policy-driven callers (e.g. AdaGraph exploit / migration) that must
+        keep a child in its parent's problem_view rather than letting LLM_place
+        re-frame it.  Falls back to :meth:`insert` (with an ``attach`` hint) when the
+        parent leaf is not in the tree.
+        """
+        ss_node = self._solution_strategy_of(parent_solution_id)
+        if ss_node is None:
+            await self.insert(
+                solution_id=solution_id,
+                score=score,
+                rationale=rationale,
+                iteration=iteration,
+                parent_id=parent_id,
+                placement_hint="attach",
+                extra=extra,
+            )
+            return
+
+        t0 = time.time()
+        if len(rationale) > self.config.rationale_max_chars:
+            rationale = rationale[: self.config.rationale_max_chars] + "\n... (truncated)"
+
+        decision = {
+            "action": "ATTACH_TO",
+            "target_id": ss_node.id,
+            "leaf_label": leaf_label,
+            "leaf_description": rationale[:300],
+        }
+        leaf_id = self._apply_decision(decision, solution_id, score, rationale, False)
+        elapsed_ms = int((time.time() - t0) * 1000)
+
+        placement_path = get_placement_path(self.root, leaf_id) if leaf_id else []
+        path_str = " → ".join(placement_path) if placement_path else "(root)"
+        score_str = f"{score:.4f}" if score is not None else "N/A"
+        logger.info(
+            f'ExperienceGraph [ATTACH_TO·forced] "{leaf_label}" score={score_str} → {path_str}'
+        )
+
+        event = {
+            "event_type": "insert",
+            "iteration": iteration,
+            "timestamp": datetime.now().isoformat(),
+            "solution_id": solution_id,
+            "parent_id": parent_id,
+            "score": score,
+            "is_paradigm_breakthrough": False,
+            "action": "ATTACH_TO",
+            "leaf_label": leaf_label,
+            "placement_path": placement_path,
+            "total_leaves": self._total_leaves,
+            "total_internal": self._total_internal,
+            "llm_place_time_ms": elapsed_ms,
+            "forced_attach": True,
+        }
+        if extra:
+            event.update(extra)
+        self._log_event(event)
+        self.save()
+
+        self._insert_count += 1
+        if self.config.snapshot_interval > 0 and self._insert_count % self.config.snapshot_interval == 0:
+            self._save_snapshot(iteration=iteration, trigger="interval")
+
+    def _finalize_structural_insert(
+        self,
+        leaf_id: str,
+        solution_id: str,
+        score: float,
+        action: str,
+        leaf_label: str,
+        iteration: int,
+        parent_id: Optional[str],
+        extra: Optional[Dict[str, Any]],
+    ) -> None:
+        """Shared event-log + persistence tail for the deterministic mutators."""
+        placement_path = get_placement_path(self.root, leaf_id) if leaf_id else []
+        path_str = " → ".join(placement_path) if placement_path else "(root)"
+        score_str = f"{score:.4f}" if score is not None else "N/A"
+        logger.info(f'ExperienceGraph [{action}·forced] "{leaf_label}" score={score_str} → {path_str}')
+        event = {
+            "event_type": "insert",
+            "iteration": iteration,
+            "timestamp": datetime.now().isoformat(),
+            "solution_id": solution_id,
+            "parent_id": parent_id,
+            "score": score,
+            "is_paradigm_breakthrough": False,
+            "action": action,
+            "leaf_label": leaf_label,
+            "placement_path": placement_path,
+            "total_leaves": self._total_leaves,
+            "total_internal": self._total_internal,
+            "llm_place_time_ms": 0,
+            "forced": True,
+        }
+        if extra:
+            event.update(extra)
+        self._log_event(event)
+        self.save()
+        self._insert_count += 1
+        if self.config.snapshot_interval > 0 and self._insert_count % self.config.snapshot_interval == 0:
+            self._save_snapshot(iteration=iteration, trigger="interval")
+
+    def create_direction(
+        self,
+        problem_view_id: str,
+        solution_id: str,
+        score: float,
+        rationale: str,
+        ss_label: str,
+        ss_description: Optional[str] = None,
+        leaf_label: str = "solution",
+        iteration: int = 0,
+        parent_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Deterministically create a NEW solution_strategy (direction) under an
+        existing problem_view and attach the leaf there. No LLM_place.
+
+        Returns False if the problem_view node is not found.
+        """
+        pv = find_node(self.root, problem_view_id)
+        if pv is None or pv.node_type != "internal":
+            return False
+        ss = GraphNode(
+            id=str(uuid.uuid4()),
+            node_type="internal",
+            field_name="solution_strategy",
+            label=ss_label or "New Direction",
+            description=ss_description,
+        )
+        leaf = GraphNode(
+            id=str(uuid.uuid4()),
+            node_type="leaf",
+            label=leaf_label,
+            description=(rationale or "")[:300],
+            solution_id=solution_id,
+            score=score,
+            rationale_ref=(rationale or "")[:1500],
+        )
+        ss.children.append(leaf)
+        pv.children.append(ss)
+        self._total_internal += 1
+        self._total_leaves += 1
+        self._finalize_structural_insert(
+            leaf.id, solution_id, score, "NEW_DIRECTION", leaf_label, iteration, parent_id, extra
+        )
+        return True
+
+    def create_problem_view(
+        self,
+        pv_label: str,
+        solution_id: str,
+        score: float,
+        rationale: str,
+        ss_label: str = "Initial Direction",
+        pv_description: Optional[str] = None,
+        ss_description: Optional[str] = None,
+        leaf_label: str = "solution",
+        iteration: int = 0,
+        parent_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Deterministically create a NEW problem_view → solution_strategy → leaf
+        chain under the root. No LLM_place. Returns the new problem_view node id."""
+        pv = GraphNode(
+            id=str(uuid.uuid4()),
+            node_type="internal",
+            field_name="problem_view",
+            label=pv_label or "New Framing",
+            description=pv_description,
+        )
+        ss = GraphNode(
+            id=str(uuid.uuid4()),
+            node_type="internal",
+            field_name="solution_strategy",
+            label=ss_label or "Initial Direction",
+            description=ss_description,
+        )
+        leaf = GraphNode(
+            id=str(uuid.uuid4()),
+            node_type="leaf",
+            label=leaf_label,
+            description=(rationale or "")[:300],
+            solution_id=solution_id,
+            score=score,
+            rationale_ref=(rationale or "")[:1500],
+        )
+        ss.children.append(leaf)
+        pv.children.append(ss)
+        self.root.children.append(pv)
+        self._total_internal += 2
+        self._total_leaves += 1
+        self._finalize_structural_insert(
+            leaf.id, solution_id, score, "NEW_FORM", leaf_label, iteration, parent_id, extra
+        )
+        return pv.id
+
     async def summarize(self, iteration: int = 0) -> str:
         """Render the tree as compact text.
 
