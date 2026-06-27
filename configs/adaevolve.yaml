@@ -23,19 +23,19 @@ random_seed: 42
 
 # LLM configuration
 llm:
+  api_base: "https://api.int2.net/v1"
   models:
-    - name: "gpt-5"
+    - name: "glm-5.2"
       weight: 1.0
-  api_base: "https://api.openai.com/v1"
   temperature: 0.7
   # top_p: 0.95  # omitted by default; some providers (e.g. Anthropic) reject both temperature and top_p
   max_tokens: 32000
   timeout: 600
-  # To use Gemini: comment out models + api_base above, uncomment below
-  # models:
-  #   - name: "gemini-3-pro-preview"
-  # api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
-  # api_key: ${GEMINI_API_KEY}
+  thinking: false           # no reasoning — don't burn tokens on chain-of-thought
+  stream_no_text: true      # stream the response (keeps long generations alive,
+                            # reports tok/s) but suppress echoing tokens to stdout
+  # API key is intentionally NOT stored here — export it as an env var instead
+  # (e.g. OPENAI_API_KEY), never commit secrets to config files.
 
 # Search configuration
 search:

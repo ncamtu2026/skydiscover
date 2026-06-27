@@ -159,6 +159,12 @@ class LLMModelConfig:
     # None = inherit from the top-level LLMConfig default.
     stream: Optional[bool] = None
 
+    # Stream the response but suppress echoing it to stdout. The HTTP stream is
+    # still consumed (keeps long generations alive, yields usage / tok-per-sec
+    # stats) but no reasoning or content text is printed. Implies streaming.
+    # None = inherit from the top-level LLMConfig default.
+    stream_no_text: Optional[bool] = None
+
 
 @dataclass
 class LLMConfig(LLMModelConfig):
@@ -182,6 +188,10 @@ class LLMConfig(LLMModelConfig):
     # None = unset (backends decide their own default; GraphEvolve defaults ON).
     # True/False here is an explicit, propagated override.
     stream: Optional[bool] = None
+
+    # Stream the response but suppress echoing tokens to stdout (see
+    # LLMModelConfig.stream_no_text). Implies streaming when set.
+    stream_no_text: Optional[bool] = None
 
     # model(s) for solution discovery
     models: List[LLMModelConfig] = field(default_factory=list)
@@ -252,6 +262,7 @@ class LLMConfig(LLMModelConfig):
             "thinking": self.thinking,
             "thinking_budget": self.thinking_budget,
             "stream": self.stream,
+            "stream_no_text": self.stream_no_text,
         }
         self.update_model_params(shared_config)
 
@@ -1182,6 +1193,7 @@ def apply_overrides(
                 "thinking": config.llm.thinking,
                 "thinking_budget": config.llm.thinking_budget,
                 "stream": config.llm.stream,
+                "stream_no_text": config.llm.stream_no_text,
             },
             overwrite=False,
         )

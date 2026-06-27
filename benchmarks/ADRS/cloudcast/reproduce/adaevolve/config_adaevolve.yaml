@@ -10,7 +10,7 @@ max_solution_length: 60000
 llm:
   api_base: https://api.int2.net/v1
   models:
-    - name: "glm-4.7"
+    - name: "glm-5.2"
       weight: 1.0
   max_tokens: 32000
   timeout: 800
@@ -19,8 +19,9 @@ llm:
   thinking: false
   # reasoning_effort: "medium"
   stream: true
+  stream_no_text: true
   guide_models:                   # used for paradigm / idea generation
-    - name: "glm-4.7"
+    - name: "glm-5.2"
       weight: 1.0
       thinking: false
 
@@ -41,7 +42,7 @@ evaluator:
 monitor:
   enabled: true
   summary_api_base: https://api.int2.net/v1
-  summary_model: "glm-4.7"
+  summary_model: "glm-5.2"
 
 log_level: "DEBUG"
 
@@ -56,3 +57,5 @@ search:
     use_unified_archive: true
     use_paradigm_breakthrough: true
     use_knowledge_evolve: false   # OFF — isolate the search algorithm for the comparison
+    use_experience_graph: true            # build + save ExperienceGraph for record-keeping
+    experience_graph_use_paradigm: false  # don't feed EG summary into paradigm context

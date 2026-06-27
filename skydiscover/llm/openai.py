@@ -69,7 +69,9 @@ class OpenAILLM(LLMInterface):
         self.reasoning_effort = getattr(model_cfg, "reasoning_effort", None)
         self.thinking = getattr(model_cfg, "thinking", None)
         self.thinking_budget = getattr(model_cfg, "thinking_budget", None)
-        self.stream = bool(getattr(model_cfg, "stream", None) or False)
+        # stream_no_text implies streaming, but with stdout echo suppressed.
+        self.stream_no_text = bool(getattr(model_cfg, "stream_no_text", None) or False)
+        self.stream = bool(getattr(model_cfg, "stream", None) or False) or self.stream_no_text
 
         max_retries = self.retries if self.retries is not None else 0
         is_azure = self.api_base and ".openai.azure.com" in self.api_base.lower()
@@ -307,6 +309,9 @@ class OpenAILLM(LLMInterface):
         """
         loop = asyncio.get_running_loop()
         model = params.get("model", self.model)
+        # When stream_no_text is set we still drain the stream (to keep long
+        # generations alive and collect usage stats) but echo nothing to stdout.
+        echo = not self.stream_no_text
 
         def _reasoning_of(delta) -> Optional[str]:
             # Thinking providers (GLM-4.7, DeepSeek-R1, ...) stream the chain of
@@ -327,9 +332,12 @@ class OpenAILLM(LLMInterface):
             parts: List[str] = []
             usage = None
             in_reasoning = False
+            n_chunks = 0
+            label = f"[stream {model}]"
             t0 = time.perf_counter()
-            sys.stdout.write(f"\n--- streaming [{model}] ---\n")
-            sys.stdout.flush()
+            if echo:
+                sys.stdout.write(f"\n--- streaming [{model}] ---\n")
+                sys.stdout.flush()
             for chunk in self.client.chat.completions.create(**params):
                 if getattr(chunk, "usage", None):
                     usage = chunk.usage
@@ -339,23 +347,35 @@ class OpenAILLM(LLMInterface):
                 delta = choices[0].delta
                 reasoning = _reasoning_of(delta)
                 if reasoning:
-                    if not in_reasoning:
-                        sys.stdout.write("\n<reasoning>\n")
-                        in_reasoning = True
-                    sys.stdout.write(reasoning)
-                    sys.stdout.flush()
+                    n_chunks += 1
+                    if echo:
+                        if not in_reasoning:
+                            sys.stdout.write("\n<reasoning>\n")
+                            in_reasoning = True
+                        sys.stdout.write(reasoning)
+                        sys.stdout.flush()
                 piece = getattr(delta, "content", None)
                 if piece:
+                    n_chunks += 1
                     if in_reasoning:
-                        sys.stdout.write("\n</reasoning>\n")
+                        if echo:
+                            sys.stdout.write("\n</reasoning>\n")
                         in_reasoning = False
                     parts.append(piece)
-                    sys.stdout.write(piece)
+                    if echo:
+                        sys.stdout.write(piece)
+                        sys.stdout.flush()
+                if not echo:
+                    sys.stdout.write(f"\r{label} generated {n_chunks} tokens...")
                     sys.stdout.flush()
-            if in_reasoning:
-                sys.stdout.write("\n</reasoning>\n")
-            sys.stdout.write("\n--- end stream ---\n")
-            sys.stdout.flush()
+            if echo:
+                if in_reasoning:
+                    sys.stdout.write("\n</reasoning>\n")
+                sys.stdout.write("\n--- end stream ---\n")
+                sys.stdout.flush()
+            else:
+                sys.stdout.write(f"\r{label} generated {n_chunks} tokens.   \n")
+                sys.stdout.flush()
             return "".join(parts), usage, time.perf_counter() - t0
 
         content, usage, elapsed = await loop.run_in_executor(None, _drain)
